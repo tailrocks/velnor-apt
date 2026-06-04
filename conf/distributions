@@ -7,4 +7,4 @@ Components: main
 Description: apt repository for the Velnor self-hosted GitHub Actions runner
 # Set this to the GPG signing key id (or fingerprint) after creating the key.
 # Leave commented to build an UNSIGNED repo (not recommended; apt will warn).
-# SignWith: REPLACE_WITH_GPG_KEY_ID
+SignWith: 77786ADA478A7BCD
