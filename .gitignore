@@ -1,0 +1,5 @@
+public/
+incoming/
+*.deb
+db/
+.gnupg/
