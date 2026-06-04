@@ -1,0 +1,91 @@
+name: Publish apt repo
+
+# Adds a velnor-runner .deb to the signed apt pool and publishes the tree to
+# GitHub Pages (gh-pages branch). Trigger after a velnor-runner release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "velnor-runner release tag to publish (e.g. v0.1.0). Empty = latest."
+        type: string
+        default: ""
+  # Optional: let the velnor repo's release workflow trigger this via
+  #   gh api repos/donbeave/velnor-apt/dispatches -f event_type=publish-deb
+  repository_dispatch:
+    types: [publish-deb]
+
+permissions:
+  contents: write # push to gh-pages
+
+concurrency:
+  group: publish-apt
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo config (conf/distributions, keep apt state on gh-pages)
+        uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: sudo apt-get update && sudo apt-get install -y reprepro gnupg
+
+      - name: Import GPG signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY secret is not set — see README one-time setup."
+            exit 1
+          fi
+          echo "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          # Export the public key into the tree so users can fetch velnor.gpg.
+          KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
+          echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
+          gpg --armor --export "$KEYID" > velnor.gpg
+
+      - name: Download velnor-runner .deb from the velnor release
+        env:
+          GH_TOKEN: ${{ secrets.VELNOR_RELEASE_TOKEN || github.token }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p incoming
+          if [ -n "${VERSION:-}" ]; then TAG="$VERSION"; else TAG="$(gh release view --repo donbeave/velnor --json tagName -q .tagName)"; fi
+          echo "Publishing velnor-runner $TAG"
+          gh release download "$TAG" --repo donbeave/velnor --pattern '*.deb' --dir incoming
+          ls -la incoming
+
+      - name: Fetch existing apt tree from gh-pages (so reprepro keeps old versions)
+        run: |
+          set -euo pipefail
+          git fetch origin gh-pages || true
+          mkdir -p public
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git --work-tree=public checkout origin/gh-pages -- . || true
+          fi
+          mkdir -p public/conf
+          # Inject the real key id into conf/distributions for SignWith.
+          sed "s/^# SignWith:.*/SignWith: ${GPG_KEYID}/; s/^SignWith:.*/SignWith: ${GPG_KEYID}/" conf/distributions > public/conf/distributions
+          cp velnor.gpg public/velnor.gpg
+
+      - name: reprepro includedeb (builds + signs Release/InRelease)
+        env:
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          for deb in incoming/*.deb; do
+            reprepro -b public --gnupghome "$HOME/.gnupg" includedeb stable "$deb"
+          done
+          ls -R public/dists public/pool | head -50
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          publish_branch: gh-pages
+          keep_files: true
