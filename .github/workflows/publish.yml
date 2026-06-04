@@ -47,16 +47,19 @@ jobs:
           echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
           gpg --armor --export "$KEYID" > velnor.gpg
 
-      - name: Download velnor-runner .deb from the velnor release
+      - name: Download velnor-runner .deb from this repo's release
+        # The velnor repo's release-deb.yml uploads the .deb to THIS repo's
+        # releases (cross-repo write with a PAT), so publishing here only needs
+        # the same-repo github.token — no token to read the private velnor repo.
         env:
-          GH_TOKEN: ${{ secrets.VELNOR_RELEASE_TOKEN || github.token }}
-          VERSION: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.inputs.version }}${{ github.event.client_payload.version }}
         run: |
           set -euo pipefail
           mkdir -p incoming
-          if [ -n "${VERSION:-}" ]; then TAG="$VERSION"; else TAG="$(gh release view --repo donbeave/velnor --json tagName -q .tagName)"; fi
-          echo "Publishing velnor-runner $TAG"
-          gh release download "$TAG" --repo donbeave/velnor --pattern '*.deb' --dir incoming
+          if [ -n "${VERSION:-}" ]; then TAG="$VERSION"; else TAG="$(gh release view --json tagName -q .tagName)"; fi
+          echo "Publishing $TAG"
+          gh release download "$TAG" --pattern '*.deb' --dir incoming
           ls -la incoming
 
       - name: Fetch existing apt tree from gh-pages (so reprepro keeps old versions)
