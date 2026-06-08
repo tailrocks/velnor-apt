@@ -6,18 +6,18 @@ runner daemon) with native `apt`.
 
 The signed repository is published to GitHub Pages at:
 
-> https://apt.tailrocks.com/velnor-apt/
+> https://velnor-apt.tailrocks.com/
 
 ## Install
 
 ```bash
 # 1. trust the signing key (scoped to this repo via signed-by)
 sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://apt.tailrocks.com/velnor-apt/velnor.gpg \
+curl -fsSL https://velnor-apt.tailrocks.com/velnor.gpg \
   | sudo tee /etc/apt/keyrings/velnor.gpg > /dev/null
 
 # 2. add the repo
-echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://apt.tailrocks.com/velnor-apt stable main" \
+echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://velnor-apt.tailrocks.com stable main" \
   | sudo tee /etc/apt/sources.list.d/velnor.list
 
 # 3. install
@@ -57,6 +57,7 @@ Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/vel
   half as `velnor.gpg` (and into the published tree).
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
 - Enable **GitHub Pages** for this repo → Source: `GitHub Actions` (you should **always** use GitHub Actions for Pages deployments in these setups; never "Deploy from a branch").
+- Set **Custom domain** to `velnor-apt.tailrocks.com`.
 - If [velnor](https://github.com/donbeave/velnor) is private, add a read token
   secret so `publish.yml` can download the release `.deb`.
 
