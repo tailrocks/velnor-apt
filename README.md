@@ -41,12 +41,16 @@ upgrade` picks it up.
 ## How it is built
 
 1. The [velnor](https://github.com/donbeave/velnor) repo builds the `.deb` with
-   `cargo-deb` on a tagged release and attaches it to the GitHub Release.
-2. The [`publish.yml`](.github/workflows/publish.yml) workflow here downloads that
-   `.deb`, adds it to the apt pool with `reprepro` (which GPG-signs `Release` /
-   `InRelease`), uploads the tree as a GitHub Pages artifact, and deploys it
-   using GitHub Actions. (The `gh-pages` branch is still maintained internally
-   as a state store so that `reprepro` can keep old package versions.)
+   `cargo-deb` on a tagged release and attaches it to the GitHub Release
+   (the .deb is part of the original project's release process).
+2. If a PAT is configured, it also cross-uploads the .deb to the `velnor-apt`
+   repository's Releases (same tag) and triggers the publish workflow.
+3. The [`publish.yml`](.github/workflows/publish.yml) workflow here downloads the
+   .deb from *this* repo's own release, adds it to the apt pool with `reprepro`,
+   uploads the tree as a GitHub Pages artifact, and deploys it using GitHub
+   Actions. (The `apt-state` branch is used internally as a state store for
+   `reprepro` so that old package versions are preserved. GitHub Pages is
+   deployed via GitHub Actions, never from a branch.)
 
 Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/velnor/blob/main/docs/debian-apt-repo.md).
 
