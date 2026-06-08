@@ -48,9 +48,7 @@ upgrade` picks it up.
 3. The [`publish.yml`](.github/workflows/publish.yml) workflow here downloads the
    .deb from *this* repo's own release, adds it to the apt pool with `reprepro`,
    uploads the tree as a GitHub Pages artifact, and deploys it using GitHub
-   Actions. (The `apt-state` branch is used internally as a state store for
-   `reprepro` so that old package versions are preserved. GitHub Pages is
-   deployed via GitHub Actions, never from a branch.)
+   Actions. The index on Pages includes only currently published versions (old .debs remain in historical Releases but are not part of the current apt repo). GitHub Pages is deployed via GitHub Actions, never from a branch.
 
 Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/velnor/blob/main/docs/debian-apt-repo.md).
 
