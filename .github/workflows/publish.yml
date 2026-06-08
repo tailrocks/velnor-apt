@@ -47,7 +47,7 @@ jobs:
           echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
           gpg --armor --export "$KEYID" > velnor.gpg
 
-      - name: Download velnor-runner .deb from this repo's release
+      - name: Download velnor-runner .deb from this repo's release (best-effort; key publish works with zero debs)
         # The velnor repo's release-deb.yml uploads the .deb to THIS repo's
         # releases (cross-repo write with a PAT), so publishing here only needs
         # the same-repo github.token — no token to read the private velnor repo.
@@ -55,12 +55,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.event.inputs.version }}${{ github.event.client_payload.version }}
         run: |
-          set -euo pipefail
+          set +e
           mkdir -p incoming
-          if [ -n "${VERSION:-}" ]; then TAG="$VERSION"; else TAG="$(gh release view --json tagName -q .tagName)"; fi
-          echo "Publishing $TAG"
-          gh release download "$TAG" --pattern '*.deb' --dir incoming
-          ls -la incoming
+          if [ -n "${VERSION:-}" ]; then
+            TAG="$VERSION"
+          else
+            TAG="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          fi
+          if [ -n "${TAG:-}" ]; then
+            echo "Downloading debs for $TAG (if present)"
+            gh release download "$TAG" --pattern '*.deb' --dir incoming || echo "No matching debs for $TAG"
+          else
+            echo "No release tag available on this repo; publishing current tree + fresh .gpg only"
+          fi
+          ls -la incoming || true
+          set -euo pipefail
 
       - name: Fetch existing apt tree from gh-pages (so reprepro keeps old versions)
         run: |
