@@ -46,6 +46,10 @@ jobs:
           KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
           echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
           gpg --armor --export "$KEYID" > velnor.gpg
+          # Prime gpg for headless signing (loopback + supplied passphrase).
+          # Prevents "Inappropriate ioctl for device / Pinentry" errors from gpgme/reprepro in CI.
+          echo "$APT_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --sign --local-user "$KEYID" --output /dev/null --detach-sign <(echo "prime signing for reprepro") 2>/dev/null || true
 
       - name: Download velnor-runner .deb from this repo's release (best-effort; key publish works with zero debs)
         # The velnor repo's release-deb.yml uploads the .deb to THIS repo's
