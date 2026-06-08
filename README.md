@@ -56,7 +56,7 @@ Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/vel
   `APT_GPG_PRIVATE_KEY` and `APT_GPG_PASSPHRASE`; commit/publish the **public**
   half as `velnor.gpg` (and into the published tree).
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
-- Enable **GitHub Pages** for this repo → Source: `GitHub Actions`.
+- Enable **GitHub Pages** for this repo → Source: `GitHub Actions` (you should **always** use GitHub Actions for Pages deployments in these setups; never "Deploy from a branch").
 - If [velnor](https://github.com/donbeave/velnor) is private, add a read token
   secret so `publish.yml` can download the release `.deb`.
 
