@@ -52,7 +52,7 @@ Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/vel
 
 ## One-time setup (maintainer)
 
-- Create a dedicated GPG signing key (do not reuse across projects). Store the **private** key and passphrase **first in 1Password** (in the "tailrocks" vault; mirror the "holla-apt GPG Signing Key" item structure from the sibling holla-apt repo for consistency — this is the source of truth/backup). Then manually copy the armored private key to the GitHub secret `APT_GPG_PRIVATE_KEY` and passphrase to `APT_GPG_PASSPHRASE`. (We do not use 1Password loading inside GitHub Actions.) Commit/publish the **public** half as `velnor.gpg` (and into the published tree).
+- Create a dedicated GPG signing key (do not reuse across projects). Store the private key and passphrase securely. Manually copy the armored private key to the GitHub secret `APT_GPG_PRIVATE_KEY` and passphrase to `APT_GPG_PASSPHRASE`. Commit/publish the **public** half as `velnor.gpg` (and into the published tree).
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
 - Enable **GitHub Pages** for this repo → Source: `GitHub Actions` (you should **always** use GitHub Actions for Pages deployments in these setups; never "Deploy from a branch").
 - Set **Custom domain** to `velnor-apt.tailrocks.com`.
