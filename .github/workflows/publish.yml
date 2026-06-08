@@ -88,7 +88,7 @@ jobs:
 Origin: Velnor
 Label: Velnor
 Codename: stable
-Architectures: amd64
+Architectures: amd64 arm64
 Components: main
 Description: apt repository for the Velnor self-hosted GitHub Actions runner
 SignWith: 
