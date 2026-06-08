@@ -44,8 +44,9 @@ upgrade` picks it up.
    `cargo-deb` on a tagged release and attaches it to the GitHub Release.
 2. The [`publish.yml`](.github/workflows/publish.yml) workflow here downloads that
    `.deb`, adds it to the apt pool with `reprepro` (which GPG-signs `Release` /
-   `InRelease`), and publishes the tree (`dists/`, `pool/`, `velnor.gpg`) to the
-   `gh-pages` branch → GitHub Pages.
+   `InRelease`), uploads the tree as a GitHub Pages artifact, and deploys it
+   using GitHub Actions. (The `gh-pages` branch is still maintained internally
+   as a state store so that `reprepro` can keep old package versions.)
 
 Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/velnor/blob/main/docs/debian-apt-repo.md).
 
@@ -55,7 +56,7 @@ Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/vel
   `APT_GPG_PRIVATE_KEY` and `APT_GPG_PASSPHRASE`; commit/publish the **public**
   half as `velnor.gpg` (and into the published tree).
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
-- Enable **GitHub Pages** for this repo → Source: `gh-pages` branch.
+- Enable **GitHub Pages** for this repo → Source: `GitHub Actions`.
 - If [velnor](https://github.com/donbeave/velnor) is private, add a read token
   secret so `publish.yml` can download the release `.deb`.
 
