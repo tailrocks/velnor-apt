@@ -6,18 +6,18 @@ runner daemon) with native `apt`.
 
 The signed repository is published to GitHub Pages at:
 
-> https://www.zhokhov.com/velnor-apt/
+> https://apt.tailrocks.com/velnor-apt/
 
 ## Install
 
 ```bash
 # 1. trust the signing key (scoped to this repo via signed-by)
 sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://www.zhokhov.com/velnor-apt/velnor.gpg \
+curl -fsSL https://apt.tailrocks.com/velnor-apt/velnor.gpg \
   | sudo tee /etc/apt/keyrings/velnor.gpg > /dev/null
 
 # 2. add the repo
-echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://www.zhokhov.com/velnor-apt stable main" \
+echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://apt.tailrocks.com/velnor-apt stable main" \
   | sudo tee /etc/apt/sources.list.d/velnor.list
 
 # 3. install
