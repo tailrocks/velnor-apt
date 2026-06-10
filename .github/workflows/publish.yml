@@ -85,14 +85,14 @@ jobs:
           rm -rf public
           mkdir -p public/conf
           cat > public/conf/distributions << 'DIST'
-Origin: Velnor
-Label: Velnor
-Codename: stable
-Architectures: amd64 arm64
-Components: main
-Description: apt repository for the Velnor self-hosted GitHub Actions runner
-SignWith: 
-DIST
+          Origin: Velnor
+          Label: Velnor
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: apt repository for the Velnor self-hosted GitHub Actions runner
+          SignWith: 
+          DIST
           sed -i "s/^SignWith:.*/SignWith: ${GPG_KEYID}/" public/conf/distributions
           cp velnor.gpg public/velnor.gpg
 
