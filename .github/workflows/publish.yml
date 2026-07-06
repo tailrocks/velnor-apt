@@ -32,6 +32,29 @@ jobs:
       - name: Checkout repo config (conf/distributions)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Bump build marker (forces fresh GitHub Pages build version)
+        # GitHub Pages caches deployments by pages_build_version, which equals
+        # the repo HEAD sha at deploy time. If HEAD doesn't change between
+        # publishes (the workflow only reads release assets, never commits),
+        # Pages serves stale content from the previous deployment. Committing
+        # a timestamp marker guarantees a new HEAD on every run.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .last-publish
+          git add .last-publish
+          git commit -m "chore: publish marker [skip ci]"
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push; then
+              break
+            fi
+            echo "Push attempt $attempt failed, retrying..."
+            sleep 2
+          done
+
       - name: Install tooling
         run: sudo apt-get update && sudo apt-get install -y reprepro gnupg
 
