@@ -28,18 +28,22 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      build-sha: ${{ steps.bump-marker.outputs.sha }}
     steps:
       - name: Checkout repo config (conf/distributions)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Bump build marker (forces fresh GitHub Pages build version)
-        # GitHub Pages caches deployments by pages_build_version, which equals
-        # the repo HEAD sha at deploy time. If HEAD doesn't change between
-        # publishes (the workflow only reads release assets, never commits),
-        # Pages serves stale content from the previous deployment. Committing
-        # a timestamp marker guarantees a new HEAD on every run.
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # GitHub Pages caches deployments by pages_build_version (= github.sha
+        # at dispatch time). The publish workflow only reads release assets
+        # and never commits, so consecutive publishes with the same sha cause
+        # Pages to serve stale content from the previous deployment.
+        #
+        # Committing a timestamp marker guarantees a new HEAD. The new sha is
+        # passed to the deploy job as GITHUB_SHA so actions/deploy-pages sends
+        # a fresh pages_build_version.
+        id: bump-marker
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -54,6 +58,7 @@ jobs:
             echo "Push attempt $attempt failed, retrying..."
             sleep 2
           done
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Install tooling
         run: sudo apt-get update && sudo apt-get install -y reprepro gnupg
@@ -144,3 +149,9 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+        env:
+          # Override the dispatch-time sha with the fresh HEAD pushed by the
+          # build job's marker step. Without this, actions/deploy-pages reuses
+          # the same pages_build_version as the previous run and Pages serves
+          # stale content.
+          GITHUB_SHA: ${{ needs.build.outputs.build-sha }}
