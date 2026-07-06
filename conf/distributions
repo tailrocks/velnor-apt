@@ -2,7 +2,7 @@ Origin: Velnor
 Label: Velnor
 Suite: stable
 Codename: stable
-Architectures: amd64
+Architectures: amd64 arm64
 Components: main
 Description: apt repository for the Velnor self-hosted GitHub Actions runner
 # Set this to the GPG signing key id (or fingerprint) after creating the key.
