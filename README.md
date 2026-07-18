@@ -1,6 +1,6 @@
 # velnor-apt
 
-apt repository for **[Velnor](https://github.com/donbeave/velnor)** — the
+apt repository for **[Velnor](https://github.com/tailrocks/velnor)** — the
 self-hosted GitHub Actions runner. Installs and upgrades `velnor-runner` (the
 runner daemon) with native `apt`.
 
@@ -24,8 +24,10 @@ echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://velnor-apt.tailrocks.
 sudo apt update
 sudo apt install velnor-runner
 
-# 4. configure the runner (token, repo URL, labels, slots) then start it
+# 4. configure non-secret settings and the separately owned secret, then start
 sudo nano /etc/velnor/velnor.env
+sudo install -m 0600 /dev/null /etc/velnor/secrets.env
+sudo nano /etc/velnor/secrets.env
 sudo systemctl enable --now velnor-daemon
 ```
 
@@ -40,7 +42,7 @@ upgrade` picks it up.
 
 ## How it is built
 
-1. The [velnor](https://github.com/donbeave/velnor) repo builds the `.deb` with
+1. The [velnor](https://github.com/tailrocks/velnor) repo builds the `.deb` with
    `cargo-deb` on a tagged release and attaches it to the GitHub Release
    (the .deb is part of the original project's release process).
 2. If a PAT is configured, it also cross-uploads the .deb to the `velnor-apt`
@@ -50,7 +52,35 @@ upgrade` picks it up.
    uploads the tree as a GitHub Pages artifact, and deploys it using GitHub
    Actions. The index on Pages includes only currently published versions (old .debs remain in historical Releases but are not part of the current apt repo). GitHub Pages is deployed via GitHub Actions, never from a branch.
 
-Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/velnor/blob/main/docs/debian-apt-repo.md).
+Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.com/tailrocks/velnor/blob/main/docs/debian-apt-repo.md).
+
+## Release and server deployment
+
+1. Push a signed-off Velnor release commit and its `vX.Y.Z` tag. The source
+   repository's `Release deb` workflow builds amd64 and arm64 packages, checks
+   that the runner binary and canonical job-image definition are present, and
+   rejects suspiciously small packages.
+2. The source workflow uploads the packages to a same-tag Release in this
+   repository and dispatches `Publish apt repo`. That workflow creates a fresh
+   reprepro tree, signs its index, and deploys it with GitHub Actions Pages.
+3. Before changing a server, verify that the signed candidate is visible:
+
+   ```bash
+   sudo apt-get update
+   apt-cache policy velnor-runner
+   ```
+
+4. Drain the Velnor daemons and install the published candidate only through
+   APT. Do not sideload a `.deb` or replace `/usr/bin/velnor-runner` directly:
+
+   ```bash
+   sudo apt-get install velnor-runner
+   dpkg-query -W velnor-runner
+   sudo systemctl start velnor-daemon
+   ```
+
+5. Run `velnor-runner doctor` and the fixture smoke test. A rollback likewise
+   uses an indexed version: `sudo apt-get install velnor-runner=<version>`.
 
 ## One-time setup (maintainer)
 
