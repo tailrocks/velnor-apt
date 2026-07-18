@@ -81,8 +81,13 @@ Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.c
    sudo systemctl start velnor-daemon
    ```
 
-5. Run `velnor-runner doctor` and the fixture smoke test. A rollback likewise
-   uses an indexed version: `sudo apt-get install velnor-runner=<version>`.
+5. Run `velnor-runner doctor` and the fixture smoke test. Because each publish
+   intentionally builds an index containing only the requested version, a
+   rollback first dispatches `Publish apt repo` with the older release tag.
+   After that publish and Pages deployment are green, run `apt-get update`,
+   verify the older candidate with `apt-cache policy`, then install it with
+   `sudo apt-get install velnor-runner=<version>`. Never sideload its release
+   asset.
 
 ## One-time setup (maintainer)
 
