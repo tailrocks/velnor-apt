@@ -1,6 +1,6 @@
 # velnor-apt
 
-apt repository for **[Velnor](https://github.com/donbeave/velnor)** — the
+apt repository for **[Velnor](https://github.com/tailrocks/velnor)** — the
 self-hosted GitHub Actions runner. Installs and upgrades `velnor-runner` (the
 runner daemon) with native `apt`.
 
@@ -24,15 +24,19 @@ echo "deb [signed-by=/etc/apt/keyrings/velnor.gpg] https://velnor-apt.tailrocks.
 sudo apt update
 sudo apt install velnor-runner
 
-# 4. configure the runner (token, repo URL, labels, slots) then start it
+# 4. configure non-secret settings and the operator-owned token separately
 sudo nano /etc/velnor/velnor.env
+sudo install -m 0600 /dev/null /etc/velnor/secrets.env
+sudo nano /etc/velnor/secrets.env  # GITHUB_TOKEN=...
 sudo systemctl enable --now velnor-daemon
 ```
 
 ## Upgrade
 
 ```bash
-sudo apt update && sudo apt upgrade
+sudo apt update && sudo apt install velnor-runner
+apt-cache policy velnor-runner
+dpkg-query -W velnor-runner
 ```
 
 A new tagged release of `velnor-runner` adds a new `.deb` to this repo; `apt
@@ -40,7 +44,7 @@ upgrade` picks it up.
 
 ## How it is built
 
-1. The [velnor](https://github.com/donbeave/velnor) repo builds the `.deb` with
+1. The [velnor](https://github.com/tailrocks/velnor) repo builds the `.deb` with
    `cargo-deb` on a tagged release and attaches it to the GitHub Release
    (the .deb is part of the original project's release process).
 2. If a PAT is configured, it also cross-uploads the .deb to the `velnor-apt`
@@ -50,7 +54,7 @@ upgrade` picks it up.
    uploads the tree as a GitHub Pages artifact, and deploys it using GitHub
    Actions. The index on Pages includes only currently published versions (old .debs remain in historical Releases but are not part of the current apt repo). GitHub Pages is deployed via GitHub Actions, never from a branch.
 
-Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/velnor/blob/main/docs/debian-apt-repo.md).
+Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/tailrocks/velnor/blob/main/docs/debian-apt-repo.md).
 
 ## One-time setup (maintainer)
 
@@ -58,8 +62,18 @@ Design notes: [velnor `docs/debian-apt-repo.md`](https://github.com/donbeave/vel
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
 - Enable **GitHub Pages** for this repo → Source: `GitHub Actions` (you should **always** use GitHub Actions for Pages deployments in these setups; never "Deploy from a branch").
 - Set **Custom domain** to `velnor-apt.tailrocks.com`.
-- If [velnor](https://github.com/donbeave/velnor) is private, add a read token
+- If [velnor](https://github.com/tailrocks/velnor) is private, add a read token
   secret so `publish.yml` can download the release `.deb`.
+
+## Maintainer release path
+
+1. Commit and push the Velnor release commit, then push its new `vX.Y.Z` tag.
+2. Confirm Velnor's `Release deb` workflow built and validated both architectures,
+   uploaded the matching release assets here, and dispatched `Publish apt repo`.
+3. Confirm this repository's publish and Pages deployment jobs are green.
+4. Verify `dists/stable/InRelease` and the new `apt-cache policy` candidate
+   before upgrading any server. Servers install only from this signed repository;
+   do not sideload `.deb` release assets.
 
 ## License
 
