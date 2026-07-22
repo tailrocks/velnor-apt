@@ -7,6 +7,11 @@ name: Publish apt repo
 on:
   workflow_dispatch:
     inputs:
+      lanes:
+        description: velnor (default) | github | both
+        type: choice
+        default: velnor
+        options: [velnor, github, both]
       version:
         description: "velnor-runner release tag to publish (e.g. v0.1.0). Empty = latest."
         type: string
@@ -17,51 +22,37 @@ on:
     types: [publish-deb]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 concurrency:
-  group: publish-apt
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    outputs:
-      build-sha: ${{ steps.bump-marker.outputs.sha }}
+    name: Build apt repository (${{ matrix.config.lane }})
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true},{"lane":"GitHub","runner":"ubuntu-26.04","writer":false}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') && '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true}]') }}
+    runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Checkout repo config (conf/distributions)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Bump build marker (forces fresh GitHub Pages build version)
-        # GitHub Pages caches deployments by pages_build_version (= github.sha
-        # at dispatch time). The publish workflow only reads release assets
-        # and never commits, so consecutive publishes with the same sha cause
-        # Pages to serve stale content from the previous deployment.
-        #
-        # Committing a timestamp marker guarantees a new HEAD. The new sha is
-        # passed to the deploy job as GITHUB_SHA so actions/deploy-pages sends
-        # a fresh pages_build_version.
-        id: bump-marker
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > .last-publish
-          git add .last-publish
-          git commit -m "chore: publish marker [skip ci]"
-          for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push; then
-              break
-            fi
-            echo "Push attempt $attempt failed, retrying..."
-            sleep 2
-          done
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install tooling
-        run: sudo apt-get update && sudo apt-get install -y reprepro gnupg
+      - name: Install system packages through mise
+        # reprepro has no maintained user-space binary distribution; mise's
+        # exact apt bootstrap is the audited privilege boundary.
+        run: mise bootstrap packages apply --yes
 
       - name: Import GPG signing key
         env:
@@ -129,29 +120,54 @@ jobs:
               reprepro -b public --gnupghome "$HOME/.gnupg" includedeb stable "$deb"
             fi
           done
-          ls -R public/dists public/pool | head -50
+          find public/dists public/pool -print | sort | sed -n '1,50p'
 
       - name: Setup Pages
+        if: matrix.config.writer
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
 
       - name: Upload artifact
+        if: matrix.config.writer
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: ./public
 
   deploy:
+    name: Deploy apt repository (${{ matrix.config.lane }})
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true},{"lane":"GitHub","runner":"ubuntu-26.04","writer":false}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') && '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true}]') }}
+    runs-on: ${{ matrix.config.runner }}
     needs: build
     steps:
       - name: Deploy to GitHub Pages
+        if: matrix.config.writer
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+      - name: Explain read-only comparison lane
+        if: ${{ !matrix.config.writer }}
+        run: echo 'Read-only comparison lane; Pages deployment skipped.'
+
+  publish-required:
+    needs: [build, deploy]
+    if: always()
+    name: Publish required (${{ matrix.config.lane }})
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true},{"lane":"GitHub","runner":"ubuntu-26.04","writer":false}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') && '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true}]') }}
+    runs-on: ${{ matrix.config.runner }}
+    steps:
+      - name: Fail on any failed or cancelled need
         env:
-          # Override the dispatch-time sha with the fresh HEAD pushed by the
-          # build job's marker step. Without this, actions/deploy-pages reuses
-          # the same pages_build_version as the previous run and Pages serves
-          # stale content.
-          GITHUB_SHA: ${{ needs.build.outputs.build-sha }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON" | jq -e 'to_entries | map(.value.result) | any(. == "failure" or . == "cancelled") | not' >/dev/null \
+            || { echo "A required job failed or was cancelled." >&2; exit 1; }

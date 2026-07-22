@@ -1,0 +1,15 @@
+[tools]
+actionlint = "1.7.12"
+gh = "2.96.0"
+jq = "1.8.2"
+shellcheck = "0.11.0"
+
+[bootstrap.packages]
+"apt:reprepro" = "latest"
+"apt:gnupg" = "latest"
+
+[tasks.actionlint]
+run = "actionlint"
+
+[settings]
+lockfile = true
