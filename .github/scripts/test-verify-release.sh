@@ -303,6 +303,21 @@ else
   printf 'Origin: Velnor\nSuite: stable\nCodename: stable\n'
 fi
 SH
+cat > "$PUB/bin/dpkg-deb" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = -f ]
+name="$(basename "$2")"
+field="$3"
+version="$(printf '%s' "$name" | sed -E 's/^velnor-runner[-_]([0-9.]+)[-_].*$/\1/')"
+arch="$(printf '%s' "$name" | sed -E 's/^.*[-_](amd64|arm64)\.deb$/\1/')"
+case "$field" in
+  Package) printf '%s\n' velnor-runner ;;
+  Version) printf '%s\n' "$version" ;;
+  Architecture) printf '%s\n' "$arch" ;;
+  *) exit 1 ;;
+esac
+SH
 cat > "$PUB/bin/gpg" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -318,7 +333,7 @@ cat > "$PUB/bin/gpgconf" <<'SH'
 set -euo pipefail
 [ "$1 $2" = "--kill gpg-agent" ]
 SH
-chmod +x "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
+chmod +x "$PUB/bin/apt-ftparchive" "$PUB/bin/dpkg-deb" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
 (
   cd "$PUB/run"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \

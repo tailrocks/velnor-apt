@@ -335,6 +335,7 @@ cmd_publish() {
   [ -n "$signer" ] || fail "publish: --signer required"
   [ -f "$incoming/.reprepro-ok" ] || fail "publish: refusing — verify has not armed the reprepro sentinel"
   command -v apt-ftparchive >/dev/null 2>&1 || fail "publish: apt-ftparchive not installed"
+  command -v dpkg-deb >/dev/null 2>&1 || fail "publish: dpkg-deb not installed"
   command -v gpg >/dev/null 2>&1 || fail "publish: gpg not installed"
 
   prime_signer_agent "$signer"
@@ -352,7 +353,28 @@ SignWith: ${signer}
 DIST
   [ -f velnor.gpg ] && cp velnor.gpg public/velnor.gpg || true
 
-  local deb candidate destination
+  local deb candidate destination package_version package_arch
+  stage_package() {
+    deb="$1"
+    [ "$(dpkg-deb -f "$deb" Package)" = velnor-runner ] \
+      || fail "publish: staged package has unexpected name"
+    package_version="$(dpkg-deb -f "$deb" Version)"
+    package_arch="$(dpkg-deb -f "$deb" Architecture)"
+    case "$package_version" in
+      ''|*[!0-9A-Za-z.+:~-]*) fail "publish: staged package version is unsafe" ;;
+    esac
+    case "$package_arch" in
+      amd64|arm64) ;;
+      *) fail "publish: staged package architecture is unsupported" ;;
+    esac
+    destination="public/pool/main/v/velnor-runner/velnor-runner_${package_version}_${package_arch}.deb"
+    if [ -f "$destination" ]; then
+      [ "$(sha256 "$destination")" = "$(sha256 "$deb")" ] \
+        || fail "publish: canonical package identity collides with different bytes"
+    else
+      cp "$deb" "$destination"
+    fi
+  }
   # Materialize only the already-verified prior and candidate bytes. reprepro's
   # single-active-version database can retain extra pool entries as an
   # implementation side effect; a deterministic fresh pool removes that
@@ -366,18 +388,11 @@ DIST
           || fail "published package name collides with different candidate bytes: $(basename "$deb")"
         continue
       fi
-      destination="public/pool/main/v/velnor-runner/$(basename "$deb")"
-      cp "$deb" "$destination"
+      stage_package "$deb"
     done
   fi
   for deb in "$incoming"/velnor-runner-*.deb; do
-    destination="public/pool/main/v/velnor-runner/$(basename "$deb")"
-    if [ -f "$destination" ]; then
-      [ "$(sha256 "$destination")" = "$(sha256 "$deb")" ] \
-        || fail "published package name collides with different candidate bytes: $(basename "$deb")"
-    else
-      cp "$deb" "$destination"
-    fi
+    stage_package "$deb"
   done
   [ "$(find public/pool/main/v/velnor-runner -type f -name '*.deb' | awk 'END { print NR }')" = 4 ] \
     || fail "publish: deterministic pool must contain exactly four package files"
