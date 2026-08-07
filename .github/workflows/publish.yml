@@ -121,27 +121,64 @@ jobs:
 
       - name: Recover signed previous package pair
         if: matrix.config.writer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p previous
+          recovered=0
           if curl -fsS "$APT_BASE_URL/dists/stable/InRelease" -o previous/InRelease; then
             gpgv --keyring ./velnor-keyring.gpg previous/InRelease
             for arch in amd64 arm64; do
               packages="previous/Packages-$arch"
               curl -fsS "$APT_BASE_URL/dists/stable/main/binary-$arch/Packages.gz" \
                 | gzip -dc > "$packages"
-              filename="$(awk '$1=="Package:" {match_pkg=($2=="velnor-runner")} match_pkg && $1=="Filename:" {print $2}' "$packages" | tail -n1)"
-              digest="$(awk '$1=="Package:" {match_pkg=($2=="velnor-runner")} match_pkg && $1=="SHA256:" {print $2}' "$packages" | tail -n1)"
-              [ -n "$filename" ] && [ -n "$digest" ] \
-                || { echo "::error::signed $arch index lacks velnor-runner" >&2; exit 1; }
+              row="$(awk -v candidate="${VERSION#v}" '
+                BEGIN {RS=""; FS="\n"}
+                {pkg=ver=file=digest=""; for(i=1;i<=NF;i++) {
+                  if($i~/^Package: /) pkg=substr($i,10)
+                  if($i~/^Version: /) ver=substr($i,10)
+                  if($i~/^Filename: /) file=substr($i,11)
+                  if($i~/^SHA256: /) digest=substr($i,9)
+                }}
+                pkg=="velnor-runner" && ver!=candidate {print ver "|" file "|" digest}
+              ' "$packages" | sort -t'|' -k1,1V | tail -n1)"
+              [ -n "$row" ] || continue
+              IFS='|' read -r prior_version filename digest <<<"$row"
+              [ -n "$prior_version" ] && [ -n "$filename" ] && [ -n "$digest" ] \
+                || { echo "::error::signed $arch rollback row is incomplete" >&2; exit 1; }
               deb="previous/$(basename "$filename")"
               curl -fsS "$APT_BASE_URL/$filename" -o "$deb"
               printf '%s  %s\n' "$digest" "$deb" | sha256sum --check --strict
+              [ "$(dpkg-deb -f "$deb" Version)" = "$prior_version" ]
+              [ "$(dpkg-deb -f "$deb" Architecture)" = "$arch" ]
+              recovered=$((recovered + 1))
             done
-            curl -fsS "$APT_BASE_URL/.last-publish" -o .last-publish || true
+            curl -fsS "$APT_BASE_URL/last-publish" -o last-publish || true
           else
             echo 'No prior signed repository exists; initial publication has no rollback pair.'
           fi
+
+          if [ "$recovered" = 0 ] && [ "$VERSION" = v0.1.130 ]; then
+            # One-shot bridge from the last source-owned release before the
+            # coherent release-record format. Checksums remain owned by the
+            # immutable v0.1.121 GitHub Release; this restores its exact pair.
+            for tuple in 'amd64 x86_64-unknown-linux-gnu' 'arm64 aarch64-unknown-linux-gnu'; do
+              read -r arch target <<<"$tuple"
+              name="velnor-runner-0.1.121-$target.deb"
+              gh release download v0.1.121 --repo tailrocks/velnor \
+                --pattern "$name" --pattern "$name.sha256" --dir previous
+              expected="$(awk '{print $1}' "previous/$name.sha256")"
+              actual="$(sha256sum "previous/$name" | awk '{print $1}')"
+              [ "$actual" = "$expected" ]
+              [ "$(dpkg-deb -f "previous/$name" Version)" = 0.1.121 ]
+              [ "$(dpkg-deb -f "previous/$name" Architecture)" = "$arch" ]
+            done
+            recovered=2
+          fi
+          [ "$recovered" = 2 ] \
+            || { echo "::error::exact rollback package pair unavailable" >&2; exit 1; }
 
       - name: Build and sign isolated staging repository
         if: matrix.config.writer

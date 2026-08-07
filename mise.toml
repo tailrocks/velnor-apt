@@ -7,6 +7,7 @@ shellcheck = "0.11.0"
 [bootstrap.packages]
 "apt:reprepro" = "latest"
 "apt:gnupg" = "latest"
+"apt:apt-utils" = "latest"
 
 [tasks.actionlint]
 run = "actionlint"

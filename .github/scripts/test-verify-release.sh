@@ -57,7 +57,7 @@ JSON
 
 # Hand-assemble a .deb (ar archive with data.tar.gz) shipping the identity files.
 make_fake_deb() {
-  local out="$1" arch="$2" binary_bytes="${3:-runner-$2}"
+  local out="$1" arch="$2" binary_bytes="${3:-runner-$2}" version="${4:-$VER}"
   local stage; stage="$(mktemp -d)"
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$WORK/build-identity.json" "$stage/root/usr/share/velnor/build-identity.json"
@@ -65,7 +65,7 @@ make_fake_deb() {
   printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnor-runner"
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
-  printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$VER" "$arch" > "$stage/ctl/control"
+  printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$version" "$arch" > "$stage/ctl/control"
   ( cd "$stage/ctl" && tar -czf "$stage/control.tar.gz" . )
   printf '2.0\n' > "$stage/debian-binary"
   ( cd "$stage" && rm -f "$out" && ar rcS "$out" debian-binary control.tar.gz data.tar.gz )
@@ -282,17 +282,31 @@ expect_reject "extracted runner binary disagrees with record" "$D"
 PUB="$WORK/publish"
 mkdir -p "$PUB/bin" "$PUB/run" "$PUB/previous"
 cp -R "$POS/." "$PUB/run/"
-cp "$POS"/*.deb "$PUB/previous/"
+for arch in $REQUIRED_ARCHES; do
+  make_fake_deb "$PUB/previous/velnor-runner-0.1.120-$arch.deb" "$arch" \
+    "runner-$arch-previous" "0.1.120"
+done
 cat > "$PUB/bin/reprepro" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 deb="${*: -1}"
 printf '%s\n' "$deb" >> reprepro.calls
-case "$deb" in *-amd64.deb) arch=amd64 ;; *-arm64.deb) arch=arm64 ;; *) exit 1 ;; esac
-dir="public/dists/stable/main/binary-$arch"
-mkdir -p "$dir" public/dists/stable
-printf 'Package: velnor-runner\nFilename: pool/%s\nSHA256: fixture\n\n' "$(basename "$deb")" >> "$dir/Packages"
-printf 'signed-index\n' > public/dists/stable/InRelease
+mkdir -p public/pool/main/v/velnor-runner public/dists/stable
+cp "$deb" "public/pool/main/v/velnor-runner/$(basename "$deb")"
+SH
+cat > "$PUB/bin/apt-ftparchive" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "-a" ]; then
+  arch="$2"
+  for deb in pool/main/v/velnor-runner/*-"$arch".deb; do
+    version="$(basename "$deb" | sed -E 's/^velnor-runner-([0-9.]+)-.*$/\1/')"
+    printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\nFilename: %s\nSHA256: fixture\n\n' \
+      "$version" "$arch" "$deb"
+  done
+else
+  printf 'Origin: Velnor\nSuite: stable\nCodename: stable\n'
+fi
 SH
 cat > "$PUB/bin/gpg" <<'SH'
 #!/usr/bin/env bash
@@ -309,7 +323,7 @@ cat > "$PUB/bin/gpgconf" <<'SH'
 set -euo pipefail
 [ "$1 $2" = "--kill gpg-agent" ]
 SH
-chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
+chmod +x "$PUB/bin/reprepro" "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
 (
   cd "$PUB/run"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \
@@ -318,12 +332,18 @@ chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
 )
 [ -f "$PUB/run/public/publication-record.json" ] || die "publication record missing from Pages tree"
 [ -f "$PUB/run/public/publication-record.json.sig" ] || die "publication signature missing from Pages tree"
-[ "$(cat "$PUB/run/public/.last-publish")" = "$VERSION" ] || die "published rollback pointer mismatch"
+[ "$(cat "$PUB/run/public/last-publish")" = "$VERSION" ] || die "published current-version pointer mismatch"
+[ "$(jq -r .previous "$PUB/run/public/publication-record.json")" = "v0.1.120" ] \
+  || die "publication record rollback pointer mismatch"
 [ "$(jq -r .schema "$PUB/run/public/publication-record.json")" = "velnor.publication-record/v1" ] \
   || die "publication record schema mismatch"
-[ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "2" ] \
-  || die "identical prior package pair was included twice"
-ok "publication stays in Pages artifact and deduplicates identical rollback pair"
+[ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "4" ] \
+  || die "candidate and rollback package pairs were not both staged"
+for arch in $REQUIRED_ARCHES; do
+  [ "$(awk '$1=="Version:"{print $2}' "$PUB/run/public/dists/stable/main/binary-$arch/Packages" | sort -u | wc -l | tr -d ' ')" = 2 ] \
+    || die "$arch signed index does not retain two versions"
+done
+ok "publication signs candidate and exact rollback pair into both indexes"
 
 PUB_NO_PASS="$WORK/publish-no-passphrase"
 mkdir -p "$PUB_NO_PASS"

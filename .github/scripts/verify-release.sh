@@ -333,6 +333,7 @@ cmd_publish() {
   [ -n "$signer" ] || fail "publish: --signer required"
   [ -f "$incoming/.reprepro-ok" ] || fail "publish: refusing — verify has not armed the reprepro sentinel"
   command -v reprepro >/dev/null 2>&1 || fail "publish: reprepro not installed"
+  command -v apt-ftparchive >/dev/null 2>&1 || fail "publish: apt-ftparchive not installed"
   command -v gpg >/dev/null 2>&1 || fail "publish: gpg not installed"
 
   prime_signer_agent "$signer"
@@ -350,12 +351,10 @@ SignWith: ${signer}
 DIST
   [ -f velnor.gpg ] && cp velnor.gpg public/velnor.gpg || true
 
-  local deb
-  # Candidate debs first, then the exact prior published pair (never dropping the
-  # last-known-good version from the index).
-  for deb in "$incoming"/velnor-runner-*.deb; do
-    reprepro -b public --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
-  done
+  local deb candidate
+  # Seed the exact prior pair, then replace the active reprepro version with the
+  # candidate while retaining the old pool bytes. apt-ftparchive below rebuilds
+  # a multi-version Packages index from both immutable pairs.
   if [ -n "$prev_dir" ]; then
     for deb in "$prev_dir"/velnor-runner-*.deb; do
       [ -f "$deb" ] || continue
@@ -365,24 +364,62 @@ DIST
           || fail "published package name collides with different candidate bytes: $(basename "$deb")"
         continue
       fi
-      reprepro -b public --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
+      reprepro --keepunreferencedfiles -b public \
+        --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
     done
   fi
+  for deb in "$incoming"/velnor-runner-*.deb; do
+    reprepro --keepunreferencedfiles -b public \
+      --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
+  done
 
-  emit_publication_record "$version" "$incoming" "$signer"
+  local arch packages versions rollback_version="" arch_rollback
+  for arch in $REQUIRED_ARCHES; do
+    packages="public/dists/stable/main/binary-${arch}/Packages"
+    mkdir -p "$(dirname "$packages")"
+    (cd public && apt-ftparchive -a "$arch" packages pool) > "$packages"
+    versions="$(awk '$1=="Package:"{p=$2} p=="velnor-runner" && $1=="Version:"{print $2}' \
+      "$packages" | sort -u)"
+    [ "$(printf '%s\n' "$versions" | awk 'NF{n++} END{print n+0}')" = 2 ] \
+      || fail "publish: $arch index must retain exactly candidate plus rollback version"
+    printf '%s\n' "$versions" | grep -Fx "${version#v}" >/dev/null \
+      || fail "publish: $arch index lacks candidate version ${version#v}"
+    arch_rollback="$(printf '%s\n' "$versions" | grep -Fxv "${version#v}")"
+    [ -n "$arch_rollback" ] || fail "publish: $arch rollback version is empty"
+    if [ -z "$rollback_version" ]; then rollback_version="$arch_rollback"; fi
+    [ "$arch_rollback" = "$rollback_version" ] \
+      || fail "publish: architecture rollback versions differ"
+    gzip -n -9 -c "$packages" > "$packages.gz"
+  done
+
+  rm -f public/dists/stable/Release public/dists/stable/Release.gpg \
+    public/dists/stable/InRelease
+  (cd public && apt-ftparchive \
+    -o APT::FTPArchive::Release::Origin=Velnor \
+    -o APT::FTPArchive::Release::Label=Velnor \
+    -o APT::FTPArchive::Release::Suite=stable \
+    -o APT::FTPArchive::Release::Codename=stable \
+    -o APT::FTPArchive::Release::Architectures='amd64 arm64' \
+    -o APT::FTPArchive::Release::Components=main \
+    -o APT::FTPArchive::Release::Description='apt repository for the Velnor self-hosted GitHub Actions runner' \
+    release dists/stable) > public/dists/stable/Release
+  printf '%s' "$APT_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+    --passphrase-fd 0 --local-user "$signer" --armor \
+    --output public/dists/stable/Release.gpg --detach-sign public/dists/stable/Release
+  printf '%s' "$APT_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+    --passphrase-fd 0 --local-user "$signer" \
+    --output public/dists/stable/InRelease --clearsign public/dists/stable/Release
+
+  emit_publication_record "$version" "$incoming" "$signer" "v$rollback_version"
   log "publication staged in ./public and publication-record.json signed; live Pages untouched"
 }
 
 emit_publication_record() {
-  local version="$1" incoming="$2" signer="$3"
+  local version="$1" incoming="$2" signer="$3" previous="$4"
   local ver="${version#v}"
   local source_record_sha inrelease_sha
   source_record_sha="$(awk '{print $1}' "$incoming/release-record.json.sha256")"
   inrelease_sha="$(sha256 public/dists/stable/InRelease)"
-  local prev_ptr="null"
-  if [ -f .last-publish ]; then
-    prev_ptr="$(jq -Rn --rawfile p .last-publish '($p|rtrimstr("\n"))')"
-  fi
   local packages_json
   packages_json="$(
     for arch in $REQUIRED_ARCHES; do
@@ -398,7 +435,7 @@ emit_publication_record() {
     --arg inrelease "$inrelease_sha" \
     --argjson packages "$packages_json" \
     --arg signer "$signer" \
-    --argjson previous "$prev_ptr" \
+    --arg previous "$previous" \
     '{schema:$schema, source_record_sha256:$srs, tag:$tag, crate_version:$version,
       inrelease_sha256:$inrelease, packages:$packages, signer_fingerprint:$signer,
       previous:$previous}' > public/publication-record.json
@@ -406,7 +443,7 @@ emit_publication_record() {
     gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
       --local-user "$signer" --output public/publication-record.json.sig \
       --detach-sign public/publication-record.json
-  printf '%s\n' "$version" > public/.last-publish
+  printf '%s\n' "$version" > public/last-publish
 }
 
 main() {
