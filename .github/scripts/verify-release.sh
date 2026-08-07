@@ -358,7 +358,7 @@ DIST
   # implementation side effect; a deterministic fresh pool removes that
   # failure class before apt-ftparchive builds the two-version indexes.
   if [ -n "$prev_dir" ]; then
-    for deb in "$prev_dir"/velnor-runner-*.deb; do
+    for deb in "$prev_dir"/velnor-runner*.deb; do
       [ -f "$deb" ] || continue
       candidate="$incoming/$(basename "$deb")"
       if [ -f "$candidate" ]; then
