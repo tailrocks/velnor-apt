@@ -204,7 +204,8 @@ cmd_verify() {
   [ "$oci_src" = "$SOURCE_URL" ] || fail "oci label source mismatch"
   [ "$oci_mhash" = "$record_manifest_hash" ] || fail "oci label manifest hash mismatch"
   if [ "$verify_oci" = "1" ]; then
-    verify_oci_live "$image_ref" "$index_digest" "$ver" "$commit" "$record_manifest_hash"
+    verify_oci_live "$record" "$image_ref" "$index_digest" "$ver" "$commit" \
+      "$record_manifest_hash" "$oci_src"
   else
     log "skipping live OCI query (record-internal OCI coherence validated); pass --verify-oci in production"
   fi
@@ -259,22 +260,41 @@ cmd_verify() {
 }
 
 verify_oci_live() {
-  local image_ref="$1" index_digest="$2" ver="$3" commit="$4" mhash="$5"
+  local record="$1" image_ref="$2" index_digest="$3" ver="$4" commit="$5"
+  local mhash="$6" source="$7"
   command -v docker >/dev/null 2>&1 || fail "--verify-oci requires docker/buildx"
-  local json
-  json="$(docker buildx imagetools inspect "$image_ref" --format '{{json .}}')" \
+  local index_json
+  index_json="$(docker buildx imagetools inspect "$image_ref" --format '{{json .}}')" \
     || fail "could not inspect $image_ref"
-  # Confirm the live index digest and OCI labels match the record.
-  printf '%s' "$json" | jq -e --arg d "$index_digest" '.manifest.digest == $d' >/dev/null \
+  printf '%s' "$index_json" | jq -e --arg d "$index_digest" '.manifest.digest == $d' >/dev/null \
     || fail "live OCI index digest != record oci_index_digest"
-  local live_ver live_rev live_mhash
-  live_ver="$(printf '%s' "$json" | jq -r '.image.config.Labels["org.opencontainers.image.version"] // empty')"
-  live_rev="$(printf '%s' "$json" | jq -r '.image.config.Labels["org.opencontainers.image.revision"] // empty')"
-  live_mhash="$(printf '%s' "$json" | jq -r '.image.config.Labels["org.velnor.manifest-sha256"] // empty')"
-  [ "$live_ver" = "$ver" ] || fail "live OCI version label mismatch"
-  [ "$live_rev" = "$commit" ] || fail "live OCI revision label mismatch"
-  [ "$live_mhash" = "$mhash" ] || fail "live OCI manifest-sha256 label mismatch"
-  log "live OCI digest + labels match the record"
+
+  # An OCI index has no image config of its own. Bind the exact two platform
+  # manifests, then inspect and validate each child config independently.
+  local image_repo="${image_ref%@*}" arch platform_arch platform_digest child_json
+  local live_ver live_rev live_source live_mhash
+  for arch in $REQUIRED_ARCHES; do
+    case "$arch" in amd64) platform_arch=amd64 ;; arm64) platform_arch=arm64 ;; esac
+    platform_digest="$(jq -er --arg a "$arch" \
+      '.architectures[] | select(.arch==$a) | .oci_platform_digest' "$record")"
+    printf '%s' "$index_json" | jq -e --arg d "$platform_digest" --arg a "$platform_arch" \
+      '[.manifest.manifests[] | select(.digest==$d and .platform.os=="linux" and .platform.architecture==$a)] | length == 1' \
+      >/dev/null || fail "live OCI $arch platform digest mismatch"
+
+    child_json="$(docker buildx imagetools inspect "$image_repo@$platform_digest" --format '{{json .}}')" \
+      || fail "could not inspect live OCI $arch platform manifest"
+    printf '%s' "$child_json" | jq -e --arg d "$platform_digest" '.manifest.digest == $d' >/dev/null \
+      || fail "live OCI $arch child digest mismatch"
+    live_ver="$(printf '%s' "$child_json" | jq -r '.image.config.Labels["org.opencontainers.image.version"] // empty')"
+    live_rev="$(printf '%s' "$child_json" | jq -r '.image.config.Labels["org.opencontainers.image.revision"] // empty')"
+    live_source="$(printf '%s' "$child_json" | jq -r '.image.config.Labels["org.opencontainers.image.source"] // empty')"
+    live_mhash="$(printf '%s' "$child_json" | jq -r '.image.config.Labels["org.velnor.manifest-sha256"] // empty')"
+    [ "$live_ver" = "$ver" ] || fail "live OCI $arch version label mismatch"
+    [ "$live_rev" = "$commit" ] || fail "live OCI $arch revision label mismatch"
+    [ "$live_source" = "$source" ] || fail "live OCI $arch source label mismatch"
+    [ "$live_mhash" = "$mhash" ] || fail "live OCI $arch manifest-sha256 label mismatch"
+  done
+  log "live OCI index, platform digests, and labels match the record"
 }
 
 cmd_publish() {
