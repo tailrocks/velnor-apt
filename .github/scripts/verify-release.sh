@@ -297,6 +297,20 @@ verify_oci_live() {
   log "live OCI index, platform digests, and labels match the record"
 }
 
+prime_signer_agent() {
+  local signer="$1"
+  [ -n "${APT_GPG_PASSPHRASE:-}" ] \
+    || fail "publish: APT_GPG_PASSPHRASE is unset"
+  # reprepro signs through GPGME, which cannot receive our CI passphrase
+  # directly. Unlock and cache the exact key in gpg-agent with one discarded
+  # signature before reprepro mutates the staging repository.
+  printf '%s' "$APT_GPG_PASSPHRASE" | \
+    gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+      --local-user "$signer" --output /dev/null --detach-sign /dev/null \
+    || fail "publish: could not unlock the pinned APT signer"
+  trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true' EXIT
+}
+
 cmd_publish() {
   # Real publication path (needs reprepro + gpg). NOT exercised by the offline
   # test. Builds a FRESH staging tree containing the candidate + the exact prior
@@ -319,6 +333,9 @@ cmd_publish() {
   [ -n "$signer" ] || fail "publish: --signer required"
   [ -f "$incoming/.reprepro-ok" ] || fail "publish: refusing — verify has not armed the reprepro sentinel"
   command -v reprepro >/dev/null 2>&1 || fail "publish: reprepro not installed"
+  command -v gpg >/dev/null 2>&1 || fail "publish: gpg not installed"
+
+  prime_signer_agent "$signer"
 
   rm -rf public
   mkdir -p public/conf
