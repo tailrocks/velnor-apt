@@ -11,6 +11,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/verify-release.sh"
+WORKFLOW="$HERE/../workflows/publish.yml"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -259,6 +260,24 @@ chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg"
 [ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "2" ] \
   || die "identical prior package pair was included twice"
 ok "publication stays in Pages artifact and deduplicates identical rollback pair"
+
+# The source image is private. Its verifier must receive only package-read
+# authority and authenticate before asking Buildx to inspect the pinned digest.
+grep -q '^  packages: read$' "$WORKFLOW" \
+  || die "publisher lacks package-read authority"
+! grep -q '^  packages: write$' "$WORKFLOW" \
+  || die "publisher grants package-write authority"
+grep -q 'docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0' "$WORKFLOW" \
+  || die "publisher lacks pinned GHCR authentication"
+grep -q '^          registry: ghcr.io$' "$WORKFLOW" \
+  || die "publisher authenticates the wrong registry"
+grep -Fq "          password: \${{ secrets.GITHUB_TOKEN }}" "$WORKFLOW" \
+  || die "publisher does not use the ephemeral workflow token"
+login_line="$(grep -n 'name: Authenticate source image registry' "$WORKFLOW" | cut -d: -f1)"
+verify_line="$(grep -n 'name: Verify source, package, manifest, image, and signer coherence' "$WORKFLOW" | cut -d: -f1)"
+[ "$login_line" -lt "$verify_line" ] \
+  || die "publisher authenticates after OCI verification"
+ok "private GHCR verification is authenticated with read-only authority"
 
 echo "----"
 echo "all $pass verify-release checks passed"
