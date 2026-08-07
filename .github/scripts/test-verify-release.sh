@@ -304,7 +304,12 @@ done
 [ -n "$out" ]
 printf 'detached-signature\n' > "$out"
 SH
-chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg"
+cat > "$PUB/bin/gpgconf" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2" = "--kill gpg-agent" ]
+SH
+chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
 (
   cd "$PUB/run"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \
@@ -319,6 +324,21 @@ chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg"
 [ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "2" ] \
   || die "identical prior package pair was included twice"
 ok "publication stays in Pages artifact and deduplicates identical rollback pair"
+
+PUB_NO_PASS="$WORK/publish-no-passphrase"
+mkdir -p "$PUB_NO_PASS"
+cp -R "$POS/." "$PUB_NO_PASS/"
+if (
+  cd "$PUB_NO_PASS"
+  PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='' \
+    bash "$SCRIPT" publish --version "$VERSION" --incoming . \
+      --prev-dir "$PUB/previous" --signer "$SIGNER" >/dev/null 2>&1
+); then
+  die "publication accepted an empty signer passphrase"
+fi
+[ ! -e "$PUB_NO_PASS/public" ] \
+  || die "publication mutated staging before signer unlock"
+ok "publication fails before staging mutation without a signer passphrase"
 
 # The source image is private. Its verifier must receive only package-read
 # authority and authenticate before asking Buildx to inspect the pinned digest.
