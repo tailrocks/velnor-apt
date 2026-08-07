@@ -116,6 +116,53 @@ run_verify() { # dir + extra args -> exit code
     --signer "$SIGNER" --expect-signer "$SIGNER" "$@" >/dev/null 2>&1
 }
 
+OCI_BIN="$WORK/oci-bin"
+mkdir -p "$OCI_BIN"
+cat > "$OCI_BIN/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2 $3" = "buildx imagetools inspect" ]
+ref="$4"
+if [ "$ref" = "$MOCK_IMAGE_REF" ]; then
+  jq -n \
+    --arg index "$MOCK_INDEX" --arg amd "$MOCK_AMD" --arg arm "$MOCK_ARM" \
+    '{manifest:{digest:$index,manifests:[
+      {digest:$amd,platform:{os:"linux",architecture:"amd64"}},
+      {digest:$arm,platform:{os:"linux",architecture:"arm64"}}
+    ]}}'
+  exit
+fi
+digest="${ref##*@}"
+case "$digest" in
+  "$MOCK_AMD") arch=amd64 ;;
+  "$MOCK_ARM") arch=arm64 ;;
+  *) exit 1 ;;
+esac
+version="$MOCK_VERSION"
+[ "${MOCK_BAD_ARCH:-}" != "$arch" ] || version=wrong
+jq -n \
+  --arg digest "$digest" --arg version "$version" --arg revision "$MOCK_COMMIT" \
+  --arg source "$MOCK_SOURCE" --arg mhash "$MOCK_MHASH" \
+  '{manifest:{digest:$digest},image:{config:{Labels:{
+    "org.opencontainers.image.version":$version,
+    "org.opencontainers.image.revision":$revision,
+    "org.opencontainers.image.source":$source,
+    "org.velnor.manifest-sha256":$mhash
+  }}}}'
+SH
+chmod +x "$OCI_BIN/docker"
+
+run_verify_live() {
+  local dir="$1" bad_arch="${2:-}"
+  PATH="$OCI_BIN:$PATH" \
+    MOCK_IMAGE_REF="$IMAGE_REF" MOCK_INDEX="$INDEX" MOCK_AMD="$PLAT_AMD" \
+    MOCK_ARM="$PLAT_ARM" MOCK_VERSION="$VER" MOCK_COMMIT="$COMMIT" \
+    MOCK_SOURCE="https://github.com/tailrocks/velnor" MOCK_MHASH="$MHASH" \
+    MOCK_BAD_ARCH="$bad_arch" \
+    bash "$SCRIPT" verify --version "$VERSION" --incoming "$dir" --commit "$COMMIT" \
+      --signer "$SIGNER" --expect-signer "$SIGNER" --verify-oci >/dev/null 2>&1
+}
+
 expect_reject() { # desc dir [extra args...]
   local desc="$1" dir="$2"; shift 2
   if run_verify "$dir" "$@"; then die "expected rejection but verify passed: $desc"; fi
@@ -128,6 +175,18 @@ POS="$(fresh_copy positive)"
 run_verify "$POS" || die "positive fixture should verify"
 [ -f "$POS/.reprepro-ok" ] || die "positive fixture did not arm the reprepro sentinel"
 ok "coherent release verifies and arms the sentinel"
+
+POS_OCI="$(fresh_copy positive_oci)"
+run_verify_live "$POS_OCI" || die "multi-platform live OCI fixture should verify"
+[ -f "$POS_OCI/.reprepro-ok" ] || die "live OCI fixture did not arm the sentinel"
+ok "live OCI index binds and verifies both platform configs"
+
+D="$(fresh_copy neg_oci_platform_label)"
+if run_verify_live "$D" arm64; then
+  die "expected rejection on one platform's OCI label drift"
+fi
+[ ! -f "$D/.reprepro-ok" ] || die "sentinel armed on OCI platform label drift"
+ok "rejected: one OCI platform label differs from the release record"
 
 # ============================ negatives =======================================
 
