@@ -220,7 +220,7 @@ cmd_verify() {
     local deb_sum="$incoming/velnor-runner-${ver}-${arch}.deb.sha256"
     require_file "$deb"
     require_file "$deb_sum"
-    local want_deb have_deb record_deb
+    local want_deb have_deb record_deb record_bin have_bin
     want_deb="$(awk '{print $1}' "$deb_sum")"
     have_deb="$(sha256 "$deb")"
     [ "$want_deb" = "$have_deb" ] || fail "$arch deb sidecar checksum mismatch"
@@ -239,6 +239,9 @@ cmd_verify() {
     [ "$(jget "$bi" '.source_sha')" = "$commit" ] || fail "$arch deb build-identity source_sha != commit"
     [ "$(jget "$bi" '.crate_version')" = "$ver" ] || fail "$arch deb build-identity crate_version mismatch"
     [ "$(sha256 "$pm")" = "$record_manifest_hash" ] || fail "$arch deb packaged manifest hash != record manifest hash"
+    record_bin="$(jq -er --arg a "$arch" '.architectures[] | select(.arch==$a) | .binary_sha256' "$record")"
+    have_bin="$(sha256 "$xdir/usr/bin/velnor-runner")"
+    [ "$have_bin" = "$record_bin" ] || fail "$arch extracted runner binary hash != record binary_sha256"
     rm -rf "$xdir"
   done
 

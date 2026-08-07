@@ -56,12 +56,12 @@ JSON
 
 # Hand-assemble a .deb (ar archive with data.tar.gz) shipping the identity files.
 make_fake_deb() {
-  local out="$1" arch="$2"
+  local out="$1" arch="$2" binary_bytes="${3:-runner-$2}"
   local stage; stage="$(mktemp -d)"
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$WORK/build-identity.json" "$stage/root/usr/share/velnor/build-identity.json"
   cp "$BASE/manifest.json" "$stage/root/usr/share/velnor/manifest.json"
-  printf 'runner-%s' "$arch" > "$stage/root/usr/bin/velnor-runner"
+  printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnor-runner"
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
   printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$VER" "$arch" > "$stage/ctl/control"
@@ -205,7 +205,18 @@ sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 rm -rf "$BAD_STAGE"
 expect_reject "packaged identity inside the deb disagrees with the commit" "$D"
 
-# 10. publication writes the signed record and rollback pointer into the Pages
+# 10. extracted binary bytes disagree with the independently recorded digest.
+D="$(fresh_copy neg_binary)"
+make_fake_deb "$D/velnor-runner-${VER}-amd64.deb" amd64 tampered-runner
+NEWHASH="$(sha256_file "$D/velnor-runner-${VER}-amd64.deb")"
+printf '%s\n' "$NEWHASH" > "$D/velnor-runner-${VER}-amd64.deb.sha256"
+jq --arg h "$NEWHASH" '(.architectures[] | select(.arch=="amd64") | .deb_sha256) |= $h' \
+  "$D/release-record.json" > "$D/release-record.json.tmp"
+mv "$D/release-record.json.tmp" "$D/release-record.json"
+sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
+expect_reject "extracted runner binary disagrees with record" "$D"
+
+# 11. publication writes the signed record and rollback pointer into the Pages
 # artifact, not the checkout. Fake only the external signer/reprepro boundary;
 # candidate bytes and release record remain the independently-built fixture.
 PUB="$WORK/publish"
