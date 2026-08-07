@@ -128,6 +128,7 @@ jobs:
           set -euo pipefail
           mkdir -p previous
           recovered=0
+          prior_version=''
           if curl -fsS "$APT_BASE_URL/dists/stable/InRelease" -o previous/InRelease; then
             gpgv --keyring ./velnor-keyring.gpg previous/InRelease
             for arch in amd64 arm64; do
@@ -153,9 +154,24 @@ jobs:
               printf '%s  %s\n' "$digest" "$deb" | sha256sum --check --strict
               [ "$(dpkg-deb -f "$deb" Version)" = "$prior_version" ]
               [ "$(dpkg-deb -f "$deb" Architecture)" = "$arch" ]
+              if [ -n "$prior_version" ] && [ "$prior_version" != "${row%%|*}" ]; then
+                echo "::error::signed architecture rollback versions differ" >&2
+                exit 1
+              fi
+              prior_version="${row%%|*}"
               recovered=$((recovered + 1))
             done
             curl -fsS "$APT_BASE_URL/last-publish" -o last-publish || true
+            curl -fsS "$APT_BASE_URL/publication-record.json" -o previous/publication-record.json
+            curl -fsS "$APT_BASE_URL/publication-record.json.sig" -o previous/publication-record.json.sig
+            gpgv --keyring ./velnor-keyring.gpg \
+              previous/publication-record.json.sig previous/publication-record.json
+            jq -e --arg tag "v$prior_version" '
+              .schema == "velnor.publication-record/v1" and .tag == $tag and
+              (.source_record_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+            ' previous/publication-record.json >/dev/null
+            jq '{tag, source_record_sha256}' previous/publication-record.json \
+              > previous-pointer.json
           else
             echo 'No prior signed repository exists; initial publication has no rollback pair.'
           fi
@@ -176,9 +192,12 @@ jobs:
               [ "$(dpkg-deb -f "previous/$name" Architecture)" = "$arch" ]
             done
             recovered=2
+            printf '%s\n' '"v0.1.121"' > previous-pointer.json
           fi
           [ "$recovered" = 2 ] \
             || { echo "::error::exact rollback package pair unavailable" >&2; exit 1; }
+          [ -s previous-pointer.json ] \
+            || { echo "::error::signed rollback identity unavailable" >&2; exit 1; }
 
       - name: Build and sign isolated staging repository
         if: matrix.config.writer
@@ -191,6 +210,7 @@ jobs:
             --version "$VERSION" \
             --incoming incoming \
             --prev-dir previous \
+            --previous-pointer previous-pointer.json \
             --signer "$SIGNER"
 
       - name: Setup Pages

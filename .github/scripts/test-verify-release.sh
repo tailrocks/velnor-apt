@@ -282,6 +282,9 @@ expect_reject "extracted runner binary disagrees with record" "$D"
 PUB="$WORK/publish"
 mkdir -p "$PUB/bin" "$PUB/run" "$PUB/previous"
 cp -R "$POS/." "$PUB/run/"
+PREVIOUS_RECORD_SHA="$(printf previous-record | sha256sum | awk '{print $1}')"
+jq -n --arg tag v0.1.120 --arg sha "$PREVIOUS_RECORD_SHA" \
+  '{tag:$tag, source_record_sha256:$sha}' > "$PUB/previous-pointer.json"
 for arch in $REQUIRED_ARCHES; do
   make_fake_deb "$PUB/previous/velnor-runner-0.1.120-$arch.deb" "$arch" \
     "runner-$arch-previous" "0.1.120"
@@ -328,13 +331,16 @@ chmod +x "$PUB/bin/reprepro" "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/
   cd "$PUB/run"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \
     bash "$SCRIPT" publish --version "$VERSION" --incoming . \
-      --prev-dir "$PUB/previous" --signer "$SIGNER" >/dev/null 2>&1
+      --prev-dir "$PUB/previous" --previous-pointer "$PUB/previous-pointer.json" \
+      --signer "$SIGNER" >/dev/null 2>&1
 )
 [ -f "$PUB/run/public/publication-record.json" ] || die "publication record missing from Pages tree"
 [ -f "$PUB/run/public/publication-record.json.sig" ] || die "publication signature missing from Pages tree"
 [ "$(cat "$PUB/run/public/last-publish")" = "$VERSION" ] || die "published current-version pointer mismatch"
-[ "$(jq -r .previous "$PUB/run/public/publication-record.json")" = "v0.1.120" ] \
+[ "$(jq -r .previous.tag "$PUB/run/public/publication-record.json")" = "v0.1.120" ] \
   || die "publication record rollback pointer mismatch"
+[ "$(jq -r .previous.source_record_sha256 "$PUB/run/public/publication-record.json")" = "$PREVIOUS_RECORD_SHA" ] \
+  || die "publication record rollback digest mismatch"
 [ "$(jq -r .schema "$PUB/run/public/publication-record.json")" = "velnor.publication-record/v1" ] \
   || die "publication record schema mismatch"
 [ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "4" ] \
@@ -352,7 +358,8 @@ if (
   cd "$PUB_NO_PASS"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='' \
     bash "$SCRIPT" publish --version "$VERSION" --incoming . \
-      --prev-dir "$PUB/previous" --signer "$SIGNER" >/dev/null 2>&1
+      --prev-dir "$PUB/previous" --previous-pointer "$PUB/previous-pointer.json" \
+      --signer "$SIGNER" >/dev/null 2>&1
 ); then
   die "publication accepted an empty signer passphrase"
 fi

@@ -318,18 +318,20 @@ cmd_publish() {
   # publication-record.json. It writes only into ./public — the live Pages
   # deployment is untouched until the deploy job uploads this artifact, so a
   # failure here leaves the old Pages state active and publishable.
-  local version="" incoming="" prev_dir="" signer=""
+  local version="" incoming="" prev_dir="" previous_pointer="" signer=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --version) version="$2"; shift 2 ;;
       --incoming) incoming="$2"; shift 2 ;;
       --prev-dir) prev_dir="$2"; shift 2 ;;
+      --previous-pointer) previous_pointer="$2"; shift 2 ;;
       --signer) signer="$2"; shift 2 ;;
       *) fail "publish: unknown arg $1" ;;
     esac
   done
   [ -n "$version" ] || fail "publish: --version required"
   [ -n "$incoming" ] || fail "publish: --incoming required"
+  [ -f "$previous_pointer" ] || fail "publish: --previous-pointer required"
   [ -n "$signer" ] || fail "publish: --signer required"
   [ -f "$incoming/.reprepro-ok" ] || fail "publish: refusing — verify has not armed the reprepro sentinel"
   command -v reprepro >/dev/null 2>&1 || fail "publish: reprepro not installed"
@@ -410,12 +412,28 @@ DIST
     --passphrase-fd 0 --local-user "$signer" \
     --output public/dists/stable/InRelease --clearsign public/dists/stable/Release
 
-  emit_publication_record "$version" "$incoming" "$signer" "v$rollback_version"
+  local previous_tag
+  previous_tag="$(jq -er 'if type == "string" then . elif type == "object" then .tag else error("invalid previous pointer") end' "$previous_pointer")" \
+    || fail "publish: previous pointer is malformed"
+  [ "$previous_tag" = "v$rollback_version" ] \
+    || fail "publish: previous pointer disagrees with retained rollback version"
+  if [ "$(jq -r type "$previous_pointer")" = object ]; then
+    jq -e 'keys == ["source_record_sha256", "tag"] and
+      (.tag | type == "string") and
+      (.source_record_sha256 | type == "string" and test("^[0-9a-f]{64}$"))' \
+      "$previous_pointer" >/dev/null \
+      || fail "publish: coherent previous pointer is malformed"
+  else
+    [ "$previous_tag" = v0.1.121 ] \
+      || fail "publish: only v0.1.121 may use the legacy previous pointer"
+  fi
+
+  emit_publication_record "$version" "$incoming" "$signer" "$previous_pointer"
   log "publication staged in ./public and publication-record.json signed; live Pages untouched"
 }
 
 emit_publication_record() {
-  local version="$1" incoming="$2" signer="$3" previous="$4"
+  local version="$1" incoming="$2" signer="$3" previous_pointer="$4"
   local ver="${version#v}"
   local source_record_sha inrelease_sha
   source_record_sha="$(awk '{print $1}' "$incoming/release-record.json.sha256")"
@@ -435,7 +453,7 @@ emit_publication_record() {
     --arg inrelease "$inrelease_sha" \
     --argjson packages "$packages_json" \
     --arg signer "$signer" \
-    --arg previous "$previous" \
+    --argjson previous "$(cat "$previous_pointer")" \
     '{schema:$schema, source_record_sha256:$srs, tag:$tag, crate_version:$version,
       inrelease_sha256:$inrelease, packages:$packages, signer_fingerprint:$signer,
       previous:$previous}' > public/publication-record.json
