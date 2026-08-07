@@ -5,6 +5,6 @@ Codename: stable
 Architectures: amd64 arm64
 Components: main
 Description: apt repository for the Velnor self-hosted GitHub Actions runner
-# Set this to the GPG signing key id (or fingerprint) after creating the key.
-# Leave commented to build an UNSIGNED repo (not recommended; apt will warn).
-SignWith: 261EDAC957DEB801  (workflow injects the live value from the secret at publish time)
+# The workflow independently requires the imported private key to match this
+# committed public identity before publication.
+SignWith: 7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801

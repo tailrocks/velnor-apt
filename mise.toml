@@ -11,5 +11,17 @@ shellcheck = "0.11.0"
 [tasks.actionlint]
 run = "actionlint"
 
+# Plan 010: lint the release-verification scripts and run their offline fixture
+# tests. shellcheck catches shell defects; the fixture test proves verify-release
+# accepts a coherent release and rejects every incoherent one before reprepro.
+[tasks.shellcheck]
+run = "shellcheck .github/scripts/*.sh"
+
+[tasks.verify-release-test]
+run = ".github/scripts/test-verify-release.sh"
+
+[tasks.check]
+depends = ["actionlint", "shellcheck", "verify-release-test"]
+
 [settings]
 lockfile = true
