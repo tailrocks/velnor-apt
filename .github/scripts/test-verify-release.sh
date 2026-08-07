@@ -205,5 +205,49 @@ sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 rm -rf "$BAD_STAGE"
 expect_reject "packaged identity inside the deb disagrees with the commit" "$D"
 
+# 10. publication writes the signed record and rollback pointer into the Pages
+# artifact, not the checkout. Fake only the external signer/reprepro boundary;
+# candidate bytes and release record remain the independently-built fixture.
+PUB="$WORK/publish"
+mkdir -p "$PUB/bin" "$PUB/run" "$PUB/previous"
+cp -R "$POS/." "$PUB/run/"
+cp "$POS"/*.deb "$PUB/previous/"
+cat > "$PUB/bin/reprepro" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+deb="${*: -1}"
+printf '%s\n' "$deb" >> reprepro.calls
+case "$deb" in *-amd64.deb) arch=amd64 ;; *-arm64.deb) arch=arm64 ;; *) exit 1 ;; esac
+dir="public/dists/stable/main/binary-$arch"
+mkdir -p "$dir" public/dists/stable
+printf 'Package: velnor-runner\nFilename: pool/%s\nSHA256: fixture\n\n' "$(basename "$deb")" >> "$dir/Packages"
+printf 'signed-index\n' > public/dists/stable/InRelease
+SH
+cat > "$PUB/bin/gpg" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in --output) out="$2"; shift 2 ;; *) shift ;; esac
+done
+[ -n "$out" ]
+printf 'detached-signature\n' > "$out"
+SH
+chmod +x "$PUB/bin/reprepro" "$PUB/bin/gpg"
+(
+  cd "$PUB/run"
+  PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \
+    bash "$SCRIPT" publish --version "$VERSION" --incoming . \
+      --prev-dir "$PUB/previous" --signer "$SIGNER" >/dev/null 2>&1
+)
+[ -f "$PUB/run/public/publication-record.json" ] || die "publication record missing from Pages tree"
+[ -f "$PUB/run/public/publication-record.json.sig" ] || die "publication signature missing from Pages tree"
+[ "$(cat "$PUB/run/public/.last-publish")" = "$VERSION" ] || die "published rollback pointer mismatch"
+[ "$(jq -r .schema "$PUB/run/public/publication-record.json")" = "velnor.publication-record/v1" ] \
+  || die "publication record schema mismatch"
+[ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "2" ] \
+  || die "identical prior package pair was included twice"
+ok "publication stays in Pages artifact and deduplicates identical rollback pair"
+
 echo "----"
 echo "all $pass verify-release checks passed"

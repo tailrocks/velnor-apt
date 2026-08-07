@@ -39,32 +39,33 @@ apt-cache policy velnor-runner
 dpkg-query -W velnor-runner
 ```
 
-A new tagged release of `velnor-runner` adds a new `.deb` to this repo; `apt
-upgrade` picks it up.
+A coherent tagged `velnor-runner` release is independently verified and then
+published here; `apt upgrade` picks it up.
 
 ## How it is built
 
-1. The [velnor](https://github.com/tailrocks/velnor) repo builds the `.deb` with
-   `cargo-deb` on a tagged release and attaches it to the GitHub Release
-   (the .deb is part of the original project's release process).
-2. If a PAT is configured, it also cross-uploads the .deb to the `velnor-apt`
-   repository's Releases (same tag) and triggers the publish workflow.
-3. The [`publish.yml`](.github/workflows/publish.yml) workflow here downloads the
-   .deb from *this* repo's own release, adds it to the apt pool with `reprepro`,
-   uploads the tree as a GitHub Pages artifact, and deploys it using GitHub
-   Actions. The index on Pages includes only currently published versions (old .debs remain in historical Releases but are not part of the current apt repo). GitHub Pages is deployed via GitHub Actions, never from a branch.
+1. [Velnor](https://github.com/tailrocks/velnor) builds both architecture
+   packages, immutable OCI image, manifest, checksums, and one release record
+   from the same tagged commit.
+2. [`publish.yml`](.github/workflows/publish.yml) downloads those source-owned
+   assets directly. It independently resolves the tag and verifies every
+   package, manifest, image, signer, and record digest before `reprepro`.
+3. Publication retains the exact previously signed package pair for rollback,
+   signs fresh repository metadata plus a publication record, and deploys only
+   the verified Pages artifact. Velnor is the default execution lane; operators
+   may explicitly select GitHub or both lanes. Pages always uses GitHub Actions,
+   never a branch.
 
 Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.com/tailrocks/velnor/blob/main/docs/debian-apt-repo.md).
 
 ## Release and server deployment
 
-1. Push a signed-off Velnor release commit and its `vX.Y.Z` tag. The source
-   repository's `Release deb` workflow builds amd64 and arm64 packages, checks
-   that the runner binary and canonical job-image definition are present, and
-   rejects suspiciously small packages.
-2. The source workflow uploads the packages to a same-tag Release in this
-   repository and dispatches `Publish apt repo`. That workflow creates a fresh
-   reprepro tree, signs its index, and deploys it with GitHub Actions Pages.
+1. Merge the signed-off Velnor release commit, then push its matching `vX.Y.Z`
+   tag. The source workflow fails unless tag, crate, package, manifest, OCI, and
+   source identities agree.
+2. Dispatch `Publish apt repo` with that tag. The publisher downloads only the
+   immutable source release, verifies coherence before `reprepro`, retains the
+   signed previous pair, signs the new index/publication record, then deploys.
 3. Before changing a server, verify that the signed candidate is visible:
 
    ```bash
@@ -81,13 +82,9 @@ Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.c
    sudo systemctl start velnor-daemon
    ```
 
-5. Run `velnor-runner doctor` and the fixture smoke test. Because each publish
-   intentionally builds an index containing only the requested version, a
-   rollback first dispatches `Publish apt repo` with the older release tag.
-   After that publish and Pages deployment are green, run `apt-get update`,
-   verify the older candidate with `apt-cache policy`, then install it with
-   `sudo apt-get install velnor-runner=<version>`. Never sideload its release
-   asset.
+5. Run `velnor-runner doctor` and the fixture smoke test. The signed index keeps
+   the previous coherent version available. Roll back only through APT after
+   verifying its exact candidate; never sideload a release asset.
 
 ## One-time setup (maintainer)
 
@@ -95,14 +92,14 @@ Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.c
 - Set `SignWith:` in [`conf/distributions`](conf/distributions) to the key id.
 - Enable **GitHub Pages** for this repo → Source: `GitHub Actions` (you should **always** use GitHub Actions for Pages deployments in these setups; never "Deploy from a branch").
 - Set **Custom domain** to `velnor-apt.tailrocks.com`.
-- If [velnor](https://github.com/tailrocks/velnor) is private, add a read token
-  secret so `publish.yml` can download the release `.deb`.
+- Keep the committed `velnor.gpg` fingerprint equal to the private publisher
+  key. The workflow fails before publication when they differ.
 
 ## Maintainer release path
 
 1. Commit and push the Velnor release commit, then push its new `vX.Y.Z` tag.
-2. Confirm Velnor's `Release deb` workflow built and validated both architectures,
-   uploaded the matching release assets here, and dispatched `Publish apt repo`.
+2. Confirm Velnor's unified release workflow built and validated both
+   architectures, manifest, OCI image, checksums, and release record.
 3. Confirm this repository's publish and Pages deployment jobs are green.
 4. Verify `dists/stable/InRelease` and the new `apt-cache policy` candidate
    before upgrading any server. Servers install only from this signed repository;

@@ -318,7 +318,14 @@ DIST
   done
   if [ -n "$prev_dir" ]; then
     for deb in "$prev_dir"/velnor-runner-*.deb; do
-      [ -f "$deb" ] && reprepro -b public --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
+      [ -f "$deb" ] || continue
+      candidate="$incoming/$(basename "$deb")"
+      if [ -f "$candidate" ]; then
+        [ "$(sha256 "$candidate")" = "$(sha256 "$deb")" ] \
+          || fail "published package name collides with different candidate bytes: $(basename "$deb")"
+        continue
+      fi
+      reprepro -b public --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
     done
   fi
 
@@ -354,10 +361,12 @@ emit_publication_record() {
     --argjson previous "$prev_ptr" \
     '{schema:$schema, source_record_sha256:$srs, tag:$tag, crate_version:$version,
       inrelease_sha256:$inrelease, packages:$packages, signer_fingerprint:$signer,
-      previous:$previous}' > publication-record.json
-  gpg --batch --yes --pinentry-mode loopback --local-user "$signer" \
-    --output publication-record.json.sig --detach-sign publication-record.json
-  printf '%s\n' "$version" > .last-publish
+      previous:$previous}' > public/publication-record.json
+  printf '%s' "${APT_GPG_PASSPHRASE:-}" | \
+    gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+      --local-user "$signer" --output public/publication-record.json.sig \
+      --detach-sign public/publication-record.json
+  printf '%s\n' "$version" > public/.last-publish
 }
 
 main() {
