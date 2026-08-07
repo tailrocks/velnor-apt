@@ -289,14 +289,6 @@ for arch in $REQUIRED_ARCHES; do
   make_fake_deb "$PUB/previous/velnor-runner-0.1.120-$arch.deb" "$arch" \
     "runner-$arch-previous" "0.1.120"
 done
-cat > "$PUB/bin/reprepro" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-deb="${*: -1}"
-printf '%s\n' "$deb" >> reprepro.calls
-mkdir -p public/pool/main/v/velnor-runner public/dists/stable
-cp "$deb" "public/pool/main/v/velnor-runner/$(basename "$deb")"
-SH
 cat > "$PUB/bin/apt-ftparchive" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -326,13 +318,13 @@ cat > "$PUB/bin/gpgconf" <<'SH'
 set -euo pipefail
 [ "$1 $2" = "--kill gpg-agent" ]
 SH
-chmod +x "$PUB/bin/reprepro" "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
+chmod +x "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/gpgconf"
 (
   cd "$PUB/run"
   PATH="$PUB/bin:$PATH" APT_GPG_PASSPHRASE='fixture-passphrase' \
     bash "$SCRIPT" publish --version "$VERSION" --incoming . \
       --prev-dir "$PUB/previous" --previous-pointer "$PUB/previous-pointer.json" \
-      --signer "$SIGNER" >/dev/null 2>&1
+      --signer "$SIGNER"
 )
 [ -f "$PUB/run/public/publication-record.json" ] || die "publication record missing from Pages tree"
 [ -f "$PUB/run/public/publication-record.json.sig" ] || die "publication signature missing from Pages tree"
@@ -343,7 +335,7 @@ chmod +x "$PUB/bin/reprepro" "$PUB/bin/apt-ftparchive" "$PUB/bin/gpg" "$PUB/bin/
   || die "publication record rollback digest mismatch"
 [ "$(jq -r .schema "$PUB/run/public/publication-record.json")" = "velnor.publication-record/v1" ] \
   || die "publication record schema mismatch"
-[ "$(wc -l < "$PUB/run/reprepro.calls" | tr -d ' ')" = "4" ] \
+[ "$(find "$PUB/run/public/pool" -type f -name '*.deb' | wc -l | tr -d ' ')" = "4" ] \
   || die "candidate and rollback package pairs were not both staged"
 for arch in $REQUIRED_ARCHES; do
   [ "$(awk '$1=="Version:"{print $2}' "$PUB/run/public/dists/stable/main/binary-$arch/Packages" | sort -u | wc -l | tr -d ' ')" = 2 ] \

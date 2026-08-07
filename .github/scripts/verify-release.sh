@@ -312,8 +312,8 @@ prime_signer_agent() {
 }
 
 cmd_publish() {
-  # Real publication path (needs reprepro + gpg). NOT exercised by the offline
-  # test. Builds a FRESH staging tree containing the candidate + the exact prior
+  # Real publication path (needs apt-ftparchive + gpg). Builds a FRESH staging
+  # tree containing the candidate + the exact prior
   # published pair, signs indexes, then emits + detached-signs
   # publication-record.json. It writes only into ./public — the live Pages
   # deployment is untouched until the deploy job uploads this artifact, so a
@@ -334,14 +334,13 @@ cmd_publish() {
   [ -f "$previous_pointer" ] || fail "publish: --previous-pointer required"
   [ -n "$signer" ] || fail "publish: --signer required"
   [ -f "$incoming/.reprepro-ok" ] || fail "publish: refusing — verify has not armed the reprepro sentinel"
-  command -v reprepro >/dev/null 2>&1 || fail "publish: reprepro not installed"
   command -v apt-ftparchive >/dev/null 2>&1 || fail "publish: apt-ftparchive not installed"
   command -v gpg >/dev/null 2>&1 || fail "publish: gpg not installed"
 
   prime_signer_agent "$signer"
 
   rm -rf public
-  mkdir -p public/conf
+  mkdir -p public/conf public/pool/main/v/velnor-runner
   cat > public/conf/distributions <<DIST
 Origin: Velnor
 Label: Velnor
@@ -353,10 +352,11 @@ SignWith: ${signer}
 DIST
   [ -f velnor.gpg ] && cp velnor.gpg public/velnor.gpg || true
 
-  local deb candidate
-  # Seed the exact prior pair, then replace the active reprepro version with the
-  # candidate while retaining the old pool bytes. apt-ftparchive below rebuilds
-  # a multi-version Packages index from both immutable pairs.
+  local deb candidate destination
+  # Materialize only the already-verified prior and candidate bytes. reprepro's
+  # single-active-version database can retain extra pool entries as an
+  # implementation side effect; a deterministic fresh pool removes that
+  # failure class before apt-ftparchive builds the two-version indexes.
   if [ -n "$prev_dir" ]; then
     for deb in "$prev_dir"/velnor-runner-*.deb; do
       [ -f "$deb" ] || continue
@@ -366,14 +366,21 @@ DIST
           || fail "published package name collides with different candidate bytes: $(basename "$deb")"
         continue
       fi
-      reprepro --keepunreferencedfiles -b public \
-        --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
+      destination="public/pool/main/v/velnor-runner/$(basename "$deb")"
+      cp "$deb" "$destination"
     done
   fi
   for deb in "$incoming"/velnor-runner-*.deb; do
-    reprepro --keepunreferencedfiles -b public \
-      --gnupghome "${GNUPGHOME:-$HOME/.gnupg}" includedeb stable "$deb"
+    destination="public/pool/main/v/velnor-runner/$(basename "$deb")"
+    if [ -f "$destination" ]; then
+      [ "$(sha256 "$destination")" = "$(sha256 "$deb")" ] \
+        || fail "published package name collides with different candidate bytes: $(basename "$deb")"
+    else
+      cp "$deb" "$destination"
+    fi
   done
+  [ "$(find public/pool/main/v/velnor-runner -type f -name '*.deb' | awk 'END { print NR }')" = 4 ] \
+    || fail "publish: deterministic pool must contain exactly four package files"
 
   local arch packages versions rollback_version="" arch_rollback
   for arch in $REQUIRED_ARCHES; do
@@ -383,7 +390,7 @@ DIST
     versions="$(awk '$1=="Package:"{p=$2} p=="velnor-runner" && $1=="Version:"{print $2}' \
       "$packages" | sort -u)"
     [ "$(printf '%s\n' "$versions" | awk 'NF{n++} END{print n+0}')" = 2 ] \
-      || fail "publish: $arch index must retain exactly candidate plus rollback version"
+      || fail "publish: $arch index must retain exactly candidate plus rollback version (observed: $(printf '%s' "$versions" | tr '\n' ','))"
     printf '%s\n' "$versions" | grep -Fx "${version#v}" >/dev/null \
       || fail "publish: $arch index lacks candidate version ${version#v}"
     arch_rollback="$(printf '%s\n' "$versions" | grep -Fxv "${version#v}")"
