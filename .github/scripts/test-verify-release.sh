@@ -286,7 +286,7 @@ PREVIOUS_RECORD_SHA="$(printf previous-record | sha256sum | awk '{print $1}')"
 jq -n --arg tag v0.1.120 --arg sha "$PREVIOUS_RECORD_SHA" \
   '{tag:$tag, source_record_sha256:$sha}' > "$PUB/previous-pointer.json"
 for arch in $REQUIRED_ARCHES; do
-  make_fake_deb "$PUB/previous/velnor-runner-0.1.120-$arch.deb" "$arch" \
+  make_fake_deb "$PUB/previous/velnor-runner_0.1.120_$arch.deb" "$arch" \
     "runner-$arch-previous" "0.1.120"
 done
 cat > "$PUB/bin/apt-ftparchive" <<'SH'
@@ -294,8 +294,8 @@ cat > "$PUB/bin/apt-ftparchive" <<'SH'
 set -euo pipefail
 if [ "$1" = "-a" ]; then
   arch="$2"
-  for deb in pool/main/v/velnor-runner/*-"$arch".deb; do
-    version="$(basename "$deb" | sed -E 's/^velnor-runner-([0-9.]+)-.*$/\1/')"
+  for deb in pool/main/v/velnor-runner/*[-_]"$arch".deb; do
+    version="$(basename "$deb" | sed -E 's/^velnor-runner[-_]([0-9.]+)[-_].*$/\1/')"
     printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\nFilename: %s\nSHA256: fixture\n\n' \
       "$version" "$arch" "$deb"
   done
