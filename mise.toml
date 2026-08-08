@@ -1,6 +1,6 @@
 [tools]
 actionlint = "1.7.12"
-gh = "2.96.0"
+gh = "2.97.0"
 jq = "1.8.2"
 shellcheck = "0.11.0"
 
