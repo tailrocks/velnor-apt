@@ -146,19 +146,19 @@ jobs:
                 pkg=="velnor-runner" && ver!=candidate {print ver "|" file "|" digest}
               ' "$packages" | sort -t'|' -k1,1V | tail -n1)"
               [ -n "$row" ] || continue
-              IFS='|' read -r prior_version filename digest <<<"$row"
-              [ -n "$prior_version" ] && [ -n "$filename" ] && [ -n "$digest" ] \
+              IFS='|' read -r row_version filename digest <<<"$row"
+              [ -n "$row_version" ] && [ -n "$filename" ] && [ -n "$digest" ] \
                 || { echo "::error::signed $arch rollback row is incomplete" >&2; exit 1; }
               deb="previous/$(basename "$filename")"
               curl -fsS "$APT_BASE_URL/$filename" -o "$deb"
               printf '%s  %s\n' "$digest" "$deb" | sha256sum --check --strict
-              [ "$(dpkg-deb -f "$deb" Version)" = "$prior_version" ]
+              [ "$(dpkg-deb -f "$deb" Version)" = "$row_version" ]
               [ "$(dpkg-deb -f "$deb" Architecture)" = "$arch" ]
-              if [ -n "$prior_version" ] && [ "$prior_version" != "${row%%|*}" ]; then
+              if [ -n "$prior_version" ] && [ "$prior_version" != "$row_version" ]; then
                 echo "::error::signed architecture rollback versions differ" >&2
                 exit 1
               fi
-              prior_version="${row%%|*}"
+              prior_version="$row_version"
               recovered=$((recovered + 1))
             done
             curl -fsS "$APT_BASE_URL/last-publish" -o last-publish || true
@@ -166,12 +166,15 @@ jobs:
             curl -fsS "$APT_BASE_URL/publication-record.json.sig" -o previous/publication-record.json.sig
             gpgv --keyring ./velnor-keyring.gpg \
               previous/publication-record.json.sig previous/publication-record.json
-            jq -e --arg tag "v$prior_version" '
-              .schema == "velnor.publication-record/v1" and .tag == $tag and
-              (.source_record_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
-            ' previous/publication-record.json >/dev/null
-            jq '{tag, source_record_sha256}' previous/publication-record.json \
-              > previous-pointer.json
+            candidate_sha="$(awk 'NR == 1 {print $1}' incoming/release-record.json.sha256)"
+            [[ "$candidate_sha" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "::error::candidate release-record checksum is invalid" >&2; exit 1; }
+            jq -e \
+              --arg candidate "$VERSION" \
+              --arg prior "v$prior_version" \
+              --arg candidate_sha "$candidate_sha" \
+              -f .github/publication-previous.jq \
+              previous/publication-record.json > previous-pointer.json
           else
             echo 'No prior signed repository exists; initial publication has no rollback pair.'
           fi

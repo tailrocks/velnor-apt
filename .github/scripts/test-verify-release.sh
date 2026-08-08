@@ -392,5 +392,38 @@ verify_line="$(grep -n 'name: Verify source, package, manifest, image, and signe
   || die "publisher authenticates after OCI verification"
 ok "private GHCR verification is authenticated with read-only authority"
 
+# Same-version retries must preserve the already-signed rollback identity.
+# A normal new-version publish reads the root record; an idempotent retry reads
+# its signed `previous` pointer and proves the candidate is byte-identical.
+POINTER_FILTER="$HERE/../publication-previous.jq"
+CANDIDATE_SHA="$(printf candidate-record | sha256sum | awk '{print $1}')"
+PRIOR_SHA="$(printf prior-record | sha256sum | awk '{print $1}')"
+jq -n --arg tag v0.1.139 --arg sha "$PRIOR_SHA" \
+  '{schema:"velnor.publication-record/v1", tag:$tag, source_record_sha256:$sha}' \
+  | jq -e --arg candidate v0.1.140 --arg prior v0.1.139 \
+      --arg candidate_sha "$CANDIDATE_SHA" -f "$POINTER_FILTER" \
+  | jq -e --arg sha "$PRIOR_SHA" '.tag == "v0.1.139" and .source_record_sha256 == $sha' >/dev/null
+jq -n --arg candidate_sha "$CANDIDATE_SHA" --arg prior_sha "$PRIOR_SHA" \
+  '{schema:"velnor.publication-record/v1", tag:"v0.1.140", source_record_sha256:$candidate_sha,
+    previous:{tag:"v0.1.139", source_record_sha256:$prior_sha}}' \
+  | jq -e --arg candidate v0.1.140 --arg prior v0.1.139 \
+      --arg candidate_sha "$CANDIDATE_SHA" -f "$POINTER_FILTER" \
+  | jq -e --arg sha "$PRIOR_SHA" '.tag == "v0.1.139" and .source_record_sha256 == $sha' >/dev/null
+if jq -n --arg prior_sha "$PRIOR_SHA" \
+  '{schema:"velnor.publication-record/v1", tag:"v0.1.140", source_record_sha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    previous:{tag:"v0.1.139", source_record_sha256:$prior_sha}}' \
+  | jq -e --arg candidate v0.1.140 --arg prior v0.1.139 \
+      --arg candidate_sha "$CANDIDATE_SHA" -f "$POINTER_FILTER" >/dev/null 2>&1; then
+  die "same-version retry accepted different candidate bytes"
+fi
+if jq -n --arg candidate_sha "$CANDIDATE_SHA" --arg prior_sha "$PRIOR_SHA" \
+  '{schema:"velnor.publication-record/v1", tag:"v0.1.140", source_record_sha256:$candidate_sha,
+    previous:{tag:"v0.1.138", source_record_sha256:$prior_sha}}' \
+  | jq -e --arg candidate v0.1.140 --arg prior v0.1.139 \
+      --arg candidate_sha "$CANDIDATE_SHA" -f "$POINTER_FILTER" >/dev/null 2>&1; then
+  die "same-version retry accepted a different rollback tag"
+fi
+ok "same-version publication retry preserves signed rollback identity"
+
 echo "----"
 echo "all $pass verify-release checks passed"
