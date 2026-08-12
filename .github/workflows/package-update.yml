@@ -17,7 +17,7 @@ jobs:
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
-      current-signer-digest: "643c534b0e35f916d62c2386c1684387ade86a16"
+      current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
@@ -30,7 +30,7 @@ jobs:
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
-      current-signer-digest: "643c534b0e35f916d62c2386c1684387ade86a16"
+      current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
@@ -43,7 +43,7 @@ jobs:
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
-      current-signer-digest: "643c534b0e35f916d62c2386c1684387ade86a16"
+      current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
