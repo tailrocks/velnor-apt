@@ -380,7 +380,7 @@ grep -q '^  packages: read$' "$WORKFLOW" \
   || die "publisher lacks package-read authority"
 ! grep -q '^  packages: write$' "$WORKFLOW" \
   || die "publisher grants package-write authority"
-grep -q 'docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0' "$WORKFLOW" \
+grep -q 'docker/login-action@dbcb813823bdd20940b903addbd779551569679f' "$WORKFLOW" \
   || die "publisher lacks pinned GHCR authentication"
 grep -q '^          registry: ghcr.io$' "$WORKFLOW" \
   || die "publisher authenticates the wrong registry"

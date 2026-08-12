@@ -1,6 +1,9 @@
 name: Publish apt repo
 
 on:
+  push:
+    branches: [main]
+    paths: [package-state.json]
   workflow_dispatch:
     inputs:
       lanes:
@@ -59,15 +62,18 @@ jobs:
           REQUESTED_VERSION: ${{ github.event.inputs.version }}${{ github.event.client_payload.version }}
         run: |
           set -euo pipefail
-          version="${REQUESTED_VERSION:-}"
-          if [ -z "$version" ]; then
-            version="$(gh release view --repo tailrocks/velnor --json tagName --jq .tagName)"
-          fi
+          state_version=$(jq -er '.version | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' package-state.json)
+          state_ref=$(jq -er '.source_ref' package-state.json)
+          state_commit=$(jq -er '.source_commit | select(test("^[0-9a-f]{40}$"))' package-state.json)
+          test "$(jq -r .source_repository package-state.json)" = tailrocks/velnor
+          version="${REQUESTED_VERSION:-v$state_version}"
+          test "$state_ref" = "refs/tags/$version"
           case "$version" in
             v[0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "::error::invalid release tag: $version" >&2; exit 1 ;;
           esac
           commit="$(.github/scripts/verify-release.sh resolve-commit --version "$version")"
+          test "$commit" = "$state_commit"
           printf 'version=%s\ncommit=%s\n' "$version" "$commit" >> "$GITHUB_OUTPUT"
 
       - name: Read pinned APT signer identity
