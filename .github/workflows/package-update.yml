@@ -13,7 +13,7 @@ permissions:
 jobs:
   jackin_project:
     if: ${{ github.repository_owner == 'jackin-project' }}
-    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@bb8b180049bb23610819db68d601ad4931bc3360 # 2026.8.15
+    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@83a0dc589382b1f0523bd4c600c884ea2a39a903 # 2026.8.16
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
@@ -26,7 +26,7 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   tailrocks:
     if: ${{ github.repository_owner == 'tailrocks' }}
-    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@557c68cf385a7168911847e882cb2d041c97fe49 # 2026.8.15
+    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@be61505bece409a9d3d4b4bf9b35dbe311fc69e0 # 2026.8.16
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
@@ -39,7 +39,7 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   chainargos:
     if: ${{ github.repository_owner == 'ChainArgos' }}
-    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@b6b65cd50566965578fc327d9419783f302048d8 # 2026.8.15
+    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@f3f80818bce4e87654c3dd35fbb9996bf9f5b5a9 # 2026.8.16
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
