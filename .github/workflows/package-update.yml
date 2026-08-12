@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  jackin-project:
+  jackin_project:
     if: ${{ github.repository_owner == 'jackin-project' }}
-    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@9f4ddfd0c3072c78b33c9675c27ed1dde05a2f71 # 2026.8.11
+    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@723531499e9291309384f356468c320434661bf9 # 2026.8.12
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
@@ -25,7 +25,7 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   tailrocks:
     if: ${{ github.repository_owner == 'tailrocks' }}
-    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@8eba2febb0e1e1149de7b5bba4d1a521ccb8450f # 2026.8.11
+    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@8b0fdd07c4a805a292b12c5cd424f44c776b3e37 # 2026.8.12
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
@@ -36,9 +36,9 @@ jobs:
       branch: "package-update/verified/stable"
     secrets:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
-  ChainArgos:
+  chainargos:
     if: ${{ github.repository_owner == 'ChainArgos' }}
-    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@48e6f52c3ce35e42d17bbda35151b6717f56d3aa # 2026.8.11
+    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@53e3629f4d9d7ef2811c83ad01489502fa45d5cd # 2026.8.12
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
@@ -51,14 +51,14 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   package-update-required:
     if: ${{ always() }}
-    needs: [jackin-project, tailrocks, ChainArgos]
+    needs: [jackin_project, tailrocks, chainargos]
     runs-on: ubuntu-latest
     steps:
       - env:
           OWNER: ${{ github.repository_owner }}
-          JACKIN: ${{ needs.jackin-project.result }}
+          JACKIN: ${{ needs.jackin_project.result }}
           TAILROCKS: ${{ needs.tailrocks.result }}
-          CHAINARGOS: ${{ needs.ChainArgos.result }}
+          CHAINARGOS: ${{ needs.chainargos.result }}
         run: |
           set -euo pipefail
           case "$OWNER" in
