@@ -20,8 +20,14 @@ run = "shellcheck .github/scripts/*.sh"
 [tasks.verify-release-test]
 run = ".github/scripts/test-verify-release.sh"
 
+[tasks.package-update]
+run = "./scripts/package-update.sh"
+
+[tasks.package-update-test]
+run = "./scripts/test-package-update.sh"
+
 [tasks.check]
-depends = ["actionlint", "shellcheck", "verify-release-test"]
+depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test"]
 
 [settings]
 lockfile = true
