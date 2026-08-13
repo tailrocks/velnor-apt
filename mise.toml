@@ -29,5 +29,17 @@ run = "./scripts/test-package-update.sh"
 [tasks.check]
 depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test"]
 
+[tasks.build]
+depends = ["check"]
+
+[tasks.test]
+depends = ["verify-release-test", "package-update-test"]
+
+[tasks.lint]
+depends = ["actionlint", "shellcheck"]
+
+[tasks.fmt]
+depends = ["check"]
+
 [settings]
 lockfile = true
