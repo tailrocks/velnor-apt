@@ -1,7 +1,9 @@
 # GitHub workflow guidance
 
 - Keep one workflow shape for Velnor, GitHub, and `both` lanes.
-- Velnor is the default; GitHub uses pinned `ubuntu-26.04` only when selected.
+- Velnor is the default for secretless compute. Secret-bearing repository
+  mutation jobs such as Renovate use pinned `ubuntu-26.04`; Velnor remains the
+  read-only comparison lane for that workflow.
 - Install tools and system packages through mise; commit `mise.lock`.
 - Pin every third-party action to a full commit SHA.
 - Keep permissions least-privilege, concurrency bounded, and every job timed out.
