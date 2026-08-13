@@ -8,6 +8,8 @@
 - Pin every third-party action to a full commit SHA.
 - Keep permissions least-privilege, concurrency bounded, and every job timed out.
 - Preserve identical repository-build semantics across lanes.
-- Gate Pages artifact upload and deployment with `matrix.config.writer`.
+- Gate Pages artifact upload and deployment with `matrix.config.writer`; the
+  GitHub-hosted lane is the only publisher because signing and Pages require
+  credentials, while Velnor remains read-only verification.
 - Never use `sudo` for cache ownership or permission repair. Only the audited
   mise OS-package bootstrap boundary may elevate internally.
