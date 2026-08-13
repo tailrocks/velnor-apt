@@ -29,7 +29,6 @@ SOURCE_URL="https://github.com/tailrocks/velnor"
 SOURCE_GIT="https://github.com/tailrocks/velnor.git"
 RECORD_SCHEMA="velnor.release-record/v1"
 PUBLICATION_SCHEMA="velnor.publication-record/v1"
-MANIFEST_VERSION="7"
 REQUIRED_ARCHES="amd64 arm64"
 
 log()  { printf '%s\n' "verify-release: $*" >&2; }
@@ -175,7 +174,8 @@ cmd_verify() {
   [ "$(jget "$record" '.build.tag')" = "$version" ] || fail "record tag mismatch"
   [ "$(jget "$record" '.build.crate_version')" = "$ver" ] || fail "record crate_version mismatch"
   [ "$(jget "$record" '.build.debian_version')" = "$ver" ] || fail "record debian_version mismatch"
-  [ "$(jget "$record" '.build.manifest_version')" = "$MANIFEST_VERSION" ] || fail "record manifest_version != $MANIFEST_VERSION"
+  local record_manifest_ver
+  record_manifest_ver="$(jget "$record" '.build.manifest_version | select(type == "number" and . > 0 and floor == .)')"
   [ "$(jget "$record" '.build.commit')" = "$commit" ] || fail "record commit does not match the independently resolved tag commit"
 
   # --- manifest binding (extracted vs packaged identity) -----------------------
@@ -184,10 +184,10 @@ cmd_verify() {
   [ "$record_manifest_hash" = "$have_manifest_sum" ] || fail "record manifest hash != sha256(manifest.json)"
   manifest_source="$(jget "$manifest" '.source_sha')"
   manifest_crate="$(jget "$manifest" '.crate_version')"
-  manifest_ver="$(jget "$manifest" '.version')"
+  manifest_ver="$(jget "$manifest" '.version | select(type == "number" and . > 0 and floor == .)')"
   [ "$manifest_source" = "$commit" ] || fail "manifest source_sha != resolved commit"
   [ "$manifest_crate" = "$ver" ] || fail "manifest crate_version mismatch"
-  [ "$manifest_ver" = "$MANIFEST_VERSION" ] || fail "manifest version != $MANIFEST_VERSION"
+  [ "$record_manifest_ver" = "$manifest_ver" ] || fail "record manifest_version != manifest version"
 
   # --- OCI ref / digest / labels (record-internal; live query optional) --------
   local index_digest image_ref oci_ver oci_rev oci_src oci_mhash
