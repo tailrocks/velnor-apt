@@ -39,7 +39,7 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   chainargos:
     if: ${{ github.repository_owner == 'ChainArgos' }}
-    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@f3f80818bce4e87654c3dd35fbb9996bf9f5b5a9 # 2026.8.16
+    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@58eb26c2d6882c2240181d9cabc7eac13b5bf184 # 2026.8.18
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
