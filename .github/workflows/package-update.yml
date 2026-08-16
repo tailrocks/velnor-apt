@@ -26,7 +26,7 @@ jobs:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   tailrocks:
     if: ${{ github.repository_owner == 'tailrocks' }}
-    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@f631e08da71ce66e6968eb92c07c08b81bff87eb # 2026.8.23
+    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@5dc0863e32b72e0cd18a3551ec80db3c3ecc19f0 # 2026.8.24
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
