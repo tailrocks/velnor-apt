@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       lanes:
-        description: github writer (default) | velnor read-only | both
+        description: velnor writer (default) | github | both
         type: choice
-        default: github
+        default: velnor
         options: [velnor, github, both]
       version:
         description: Velnor source release tag (vX.Y.Z); empty selects latest
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":false},{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'velnor') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":false}]' || '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]') }}
+        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true},{"lane":"GitHub","runner":"ubuntu-26.04","writer":false}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') && '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true}]') }}
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Checkout publisher policy
@@ -242,7 +242,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":false},{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'velnor') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":false}]' || '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]') }}
+        config: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') && '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true},{"lane":"GitHub","runner":"ubuntu-26.04","writer":false}]' || (github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') && '[{"lane":"GitHub","runner":"ubuntu-26.04","writer":true}]' || '[{"lane":"Velnor","runner":["self-hosted","velnor-target-mvp"],"writer":true}]') }}
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Deploy to GitHub Pages
