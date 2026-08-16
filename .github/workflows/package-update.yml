@@ -28,7 +28,7 @@ jobs:
       matrix:
         config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
         channel: [stable]
-    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@052224913aa7c1b6750b8ed34131ae590dd961b1 # 2026.8.28
+    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@70ef9559bc2edfc1134ffff66efeb47eedef9e13 # 2026.8.29
     with:
       consumer-repository: ${{ github.repository }}
       channel: ${{ matrix.channel }}
@@ -48,7 +48,7 @@ jobs:
       matrix:
         config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
         channel: [stable]
-    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@43fc50c6940beac5a14de96f7e7d7ef3fcac568f # 2026.8.28
+    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@efabec65e3ec1048efead4221a35e086777c9337 # 2026.8.29
     with:
       consumer-repository: ${{ github.repository }}
       channel: ${{ matrix.channel }}
@@ -68,7 +68,7 @@ jobs:
       matrix:
         config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
         channel: [stable]
-    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@034bb3dfca10f405c1f6b89707aa7bc616b7d4db # 2026.8.28
+    uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@9a682568006e87f1bdd9b005a487c0148b5cd5c7 # 2026.8.29
     with:
       consumer-repository: ${{ github.repository }}
       channel: ${{ matrix.channel }}
