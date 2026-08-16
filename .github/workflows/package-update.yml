@@ -13,7 +13,7 @@ permissions:
 jobs:
   jackin_project:
     if: ${{ github.repository_owner == 'jackin-project' }}
-    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@9bca8f5cb5e3324ceae8647d7c6c6f56a82e1065 # 2026.8.23
+    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@6b854dccd06b9202e574c664e6fb2d98cb3aaf13 # 2026.8.24
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
