@@ -5,6 +5,12 @@ on:
   schedule:
     - cron: "29 */6 * * *"
   workflow_dispatch:
+    inputs:
+      lanes:
+        description: "Which runner lane(s) to verify on. Velnor is the sole writer in both mode."
+        type: choice
+        options: [velnor, github, both]
+        default: velnor
 
 permissions:
   attestations: read
@@ -17,47 +23,68 @@ concurrency:
 jobs:
   jackin_project:
     if: ${{ github.repository_owner == 'jackin-project' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
+        channel: [stable]
     uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@46a245b602c2385a3e492f98aa46bea9d483aa53 # 2026.8.27
     with:
       consumer-repository: ${{ github.repository }}
-      channel: stable
+      channel: ${{ matrix.channel }}
       current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
-      branch: "package-update/verified/stable"
+      branch: package-update/verified/${{ matrix.channel }}
+      lane: ${{ matrix.config.lane }}
+      writer: ${{ matrix.config.writer }}
     secrets:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   tailrocks:
     if: ${{ github.repository_owner == 'tailrocks' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
+        channel: [stable]
     uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@6c1350f5fa0a5662fe9bf8e2b10659dbcb667d5b # 2026.8.27
     with:
       consumer-repository: ${{ github.repository }}
-      channel: stable
+      channel: ${{ matrix.channel }}
       current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
-      branch: "package-update/verified/stable"
+      branch: package-update/verified/${{ matrix.channel }}
+      lane: ${{ matrix.config.lane }}
+      writer: ${{ matrix.config.writer }}
     secrets:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   chainargos:
     if: ${{ github.repository_owner == 'ChainArgos' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
+        channel: [stable]
     uses: ChainArgos/velnor-actions/.github/workflows/package-updater.yml@b1d1ae10ec660a522a3d3dd87f12ce9e7653a2c4 # 2026.8.27
     with:
       consumer-repository: ${{ github.repository }}
-      channel: stable
+      channel: ${{ matrix.channel }}
       current-signer-digest: "643c5341b160be151a7fae19b89b6a4f8ab3b275"
       old-signer-digest: ""
       old-signer-activated-at: ""
       old-signer-expires-at: ""
-      branch: "package-update/verified/stable"
+      branch: package-update/verified/${{ matrix.channel }}
+      lane: ${{ matrix.config.lane }}
+      writer: ${{ matrix.config.writer }}
     secrets:
       app_private_key: ${{ secrets.PACKAGE_UPDATER_APP_PRIVATE_KEY }}
   package-update-required:
     if: ${{ always() }}
     needs: [jackin_project, tailrocks, chainargos]
-    runs-on: ${{ 'ubuntu-26.04' }}
+    runs-on: ${{ ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && 'ubuntu-26.04' || fromJSON('["self-hosted","velnor-target-mvp"]') }}
     timeout-minutes: 5
     steps:
       - env:
