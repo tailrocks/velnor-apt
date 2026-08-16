@@ -17,7 +17,7 @@ concurrency:
 jobs:
   jackin_project:
     if: ${{ github.repository_owner == 'jackin-project' }}
-    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@5284c3b23c4873540f75dcf376a802adf3fc9b13 # 2026.8.25
+    uses: jackin-project/velnor-actions/.github/workflows/package-updater.yml@46a245b602c2385a3e492f98aa46bea9d483aa53 # 2026.8.27
     with:
       consumer-repository: ${{ github.repository }}
       channel: stable
