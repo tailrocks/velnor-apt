@@ -240,9 +240,15 @@ cmd_verify() {
     [ "$(jget "$bi" '.source_sha')" = "$commit" ] || fail "$arch deb build-identity source_sha != commit"
     [ "$(jget "$bi" '.crate_version')" = "$ver" ] || fail "$arch deb build-identity crate_version mismatch"
     [ "$(sha256 "$pm")" = "$record_manifest_hash" ] || fail "$arch deb packaged manifest hash != record manifest hash"
+    # The current package contract ships two binaries: the daemon is the
+    # release-record identity and systemd entrypoint; velnorctl is the
+    # operator-facing companion. Keep hashing the daemon until Plan 079
+    # removes the interim two-binary estate.
+    require_file "$xdir/usr/bin/velnor-runner"
+    require_file "$xdir/usr/bin/velnorctl"
     record_bin="$(jq -er --arg a "$arch" '.architectures[] | select(.arch==$a) | .binary_sha256' "$record")"
-    have_bin="$(sha256 "$xdir/usr/bin/velnorctl")"
-    [ "$have_bin" = "$record_bin" ] || fail "$arch extracted velnorctl binary hash != record binary_sha256"
+    have_bin="$(sha256 "$xdir/usr/bin/velnor-runner")"
+    [ "$have_bin" = "$record_bin" ] || fail "$arch extracted velnor-runner binary hash != record binary_sha256"
     rm -rf "$xdir"
   done
 
