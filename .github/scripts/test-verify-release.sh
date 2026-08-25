@@ -62,7 +62,8 @@ make_fake_deb() {
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$WORK/build-identity.json" "$stage/root/usr/share/velnor/build-identity.json"
   cp "$BASE/manifest.json" "$stage/root/usr/share/velnor/manifest.json"
-  printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnorctl"
+  printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnor-runner"
+  printf '%s' "ctl-$arch" > "$stage/root/usr/bin/velnorctl"
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
   printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$version" "$arch" > "$stage/ctl/control"
