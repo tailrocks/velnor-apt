@@ -62,7 +62,8 @@ make_fake_deb() {
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$WORK/build-identity.json" "$stage/root/usr/share/velnor/build-identity.json"
   cp "$BASE/manifest.json" "$stage/root/usr/share/velnor/manifest.json"
-  printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnorctl"
+  printf '%s' "$binary_bytes" > "$stage/root/usr/bin/velnor-runner"
+  printf 'control-panel-%s' "$arch" > "$stage/root/usr/bin/velnorctl"
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
   printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$version" "$arch" > "$stage/ctl/control"
@@ -250,7 +251,8 @@ printf '{"source_sha":"%s","tag":"%s","kind":"release","crate_version":"%s"}' \
   "3333333333333333333333333333333333333333" "$VERSION" "$VER" \
   > "$BAD_STAGE/root/usr/share/velnor/build-identity.json"
 cp "$BASE/manifest.json" "$BAD_STAGE/root/usr/share/velnor/manifest.json"
-printf 'runner-amd64' > "$BAD_STAGE/root/usr/bin/velnorctl"
+printf 'runner-amd64' > "$BAD_STAGE/root/usr/bin/velnor-runner"
+printf 'control-panel-amd64' > "$BAD_STAGE/root/usr/bin/velnorctl"
 ( cd "$BAD_STAGE/root" && tar -czf "$BAD_STAGE/data.tar.gz" . )
 mkdir -p "$BAD_STAGE/ctl"; printf 'Package: velnor-runner\n' > "$BAD_STAGE/ctl/control"
 ( cd "$BAD_STAGE/ctl" && tar -czf "$BAD_STAGE/control.tar.gz" . )
