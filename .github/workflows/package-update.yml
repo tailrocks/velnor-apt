@@ -48,7 +48,7 @@ jobs:
       matrix:
         config: ${{ fromJSON(((github.event_name == 'workflow_dispatch' && inputs.lanes == 'both') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'both')) && '[{"lane":"velnor","writer":true},{"lane":"github","writer":false}]' || ((github.event_name == 'workflow_dispatch' && inputs.lanes == 'github') || (github.event_name != 'workflow_dispatch' && vars.VELNOR_AUTOMATIC_LANES == 'github')) && '[{"lane":"github","writer":true}]' || '[{"lane":"velnor","writer":true}]') }}
         channel: [stable]
-    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@e95d6e08cb48ad365c63e5a4ffb989617e2b1414 # 2026.8.32
+    uses: tailrocks/velnor-actions/.github/workflows/package-updater.yml@0a407f71178aa587562c616e3e104b59fb908948 # 2026.8.33
     with:
       consumer-repository: ${{ github.repository }}
       channel: ${{ matrix.channel }}
