@@ -26,20 +26,29 @@ run = "./scripts/package-update.sh"
 [tasks.package-update-test]
 run = "./scripts/test-package-update.sh"
 
+# Gate contract (ci-apt.yml runs install/build/test/lint/format as separate
+# steps): every gate reaches exactly one disjoint leaf set, so each leaf runs
+# once per CI lane. `check` stays the depends-only human aggregate. The former
+# build->check and fmt->check edges re-ran all four leaves 3x per lane.
 [tasks.check]
 depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test"]
 
+# Build gate: the apt class compiles nothing in CI; the closest real
+# build/verify leaf proves the release-artifact coherence chain.
 [tasks.build]
-depends = ["check"]
+depends = ["verify-release-test"]
 
 [tasks.test]
-depends = ["verify-release-test", "package-update-test"]
+depends = ["package-update-test"]
 
 [tasks.lint]
 depends = ["actionlint", "shellcheck"]
 
+# Format gate: no formatter exists for this class (generated workflows,
+# committed lockfiles, shell scripts). The shared ci-apt template still invokes
+# `mise run fmt`, so it stays a truthful no-op instead of re-running check.
 [tasks.fmt]
-depends = ["check"]
+run = "true"
 
 [settings]
 lockfile = true
