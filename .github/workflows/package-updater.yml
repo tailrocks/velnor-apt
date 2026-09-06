@@ -281,7 +281,7 @@ jobs:
     # required callable input so a caller dispatch executes, while a direct
     # standalone dispatch (which cannot provide the input) remains a no-op.
     if: ${{ inputs.consumer-repository != '' && inputs.lane == 'github' }}
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       attestations: read
@@ -595,7 +595,7 @@ jobs:
   mutate-github:
     needs: verify-github
     if: ${{ needs.verify-github.outputs.available == 'true' && inputs.writer }}
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
