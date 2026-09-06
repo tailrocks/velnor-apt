@@ -41,7 +41,7 @@ jobs:
     # required callable input so a caller dispatch executes, while a direct
     # standalone dispatch (which cannot provide the input) remains a no-op.
     if: ${{ inputs.consumer-repository != '' }}
-    runs-on: ${{ inputs.lane == 'github' && 'ubuntu-26.04' || fromJSON('["self-hosted","velnor-target-mvp"]') }}
+    runs-on: ${{ inputs.lane == 'github' && 'ubuntu-26.04' || fromJSON('{"group":"velnor-trusted","labels":["self-hosted","velnor-target-mvp"]}') }}
     timeout-minutes: 15
     permissions:
       attestations: read
@@ -274,7 +274,7 @@ jobs:
   mutate:
     needs: verify
     if: ${{ needs.verify.outputs.available == 'true' && inputs.writer }}
-    runs-on: ${{ inputs.lane == 'github' && 'ubuntu-26.04' || fromJSON('["self-hosted","velnor-target-mvp"]') }}
+    runs-on: ${{ inputs.lane == 'github' && 'ubuntu-26.04' || fromJSON('{"group":"velnor-trusted","labels":["self-hosted","velnor-target-mvp"]}') }}
     timeout-minutes: 15
     permissions:
       contents: read
