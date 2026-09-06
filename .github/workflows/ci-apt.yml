@@ -371,7 +371,7 @@ jobs:
           restore-keys: |
             ci-v1/apt/tools/${{ runner.os }}-${{ runner.arch }}/${{ steps.cache-keys.outputs['tools-toolchain'] }}/${{ steps.cache-keys.outputs['tools-lock'] }}/
       - name: Set up mise toolchain
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: fleet:check gate
         uses: ./.github/actions/run-gate
         env:
@@ -530,7 +530,7 @@ jobs:
           restore-keys: |
             ci-v1/apt/tools/${{ runner.os }}-${{ runner.arch }}/${{ steps.cache-keys.outputs['tools-toolchain'] }}/${{ steps.cache-keys.outputs['tools-lock'] }}/
       - name: Set up mise toolchain
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: fleet:check gate
         uses: ./.github/actions/run-gate
         env:
@@ -1188,7 +1188,7 @@ jobs:
           printf 'START_MONOTONIC_MS=%s\nSTART_CPU_USEC=%s\nSTART_IO_TOTAL_USEC=%s\n' \
             "${monotonic_ms}" "${cpu_usec}" "${io_total_usec}" > .velnor-proof/runtime/start.env
       - name: Set up mise toolchain
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: install gate
         uses: ./.github/actions/run-gate
         env:
@@ -1525,7 +1525,7 @@ jobs:
           printf 'START_MONOTONIC_MS=%s\nSTART_CPU_USEC=%s\nSTART_IO_TOTAL_USEC=%s\n' \
             "${monotonic_ms}" "${cpu_usec}" "${io_total_usec}" > .velnor-proof/runtime/start.env
       - name: Set up mise toolchain
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: install gate
         uses: ./.github/actions/run-gate
         env:
