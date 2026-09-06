@@ -33,6 +33,13 @@ run = "./scripts/test-package-update.sh"
 [tasks.check]
 depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test"]
 
+# The shared Velnor apt workflow invokes this fleet contract before its
+# disjoint leaf gates. Keep the alias real and rooted in the repository's
+# complete offline check instead of leaving a stale command reference.
+[tasks."fleet:check"]
+description = "Run the complete apt repository contract"
+depends = ["check"]
+
 # Build gate: the apt class compiles nothing in CI; the closest real
 # build/verify leaf proves the release-artifact coherence chain.
 [tasks.build]

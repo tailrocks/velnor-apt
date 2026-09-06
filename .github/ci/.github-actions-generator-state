@@ -1,0 +1,15 @@
+# Generated ownership state; do not edit.
+schema = 1
+.github/ci/project.toml	a04f7c83a8820484
+.github/ci/workflow-templates/ci-apt.yml	37ee4a08c31088cc
+.github/ci/workflow-templates/ci.yml	6f894c263b423d16
+.github/ci/workflow-templates/package-update.yml	48c612e4571846c2
+.github/ci/workflow-templates/package-updater.yml	74fa4513e66b0c72
+.github/ci/workflow-templates/publish.yml	6302a506ecc31d05
+.github/ci/workflow-templates/renovate.yml	2981dfcef8feecc8
+.github/workflows/ci-apt.yml	37ee4a08c31088cc
+.github/workflows/ci.yml	6f894c263b423d16
+.github/workflows/package-update.yml	48c612e4571846c2
+.github/workflows/package-updater.yml	74fa4513e66b0c72
+.github/workflows/publish.yml	6302a506ecc31d05
+.github/workflows/renovate.yml	2981dfcef8feecc8
