@@ -1,17 +1,17 @@
 {
   "packages": [
     {
-      "name": "velnor-runner-preview-0.1.274.preview.63+5eccf68-amd64.deb",
-      "sha256": "2180e868e6ad985611e7321400a2a4eedb20f91b1fd54f920c78b4aef456ee1d"
+      "name": "velnor-runner-preview-0.1.274.preview.71+b2d5159-amd64.deb",
+      "sha256": "e1a1c8658f2f15f2329fd9f4acd76edc19b0578a8dbeb223ef3b523138d9facf"
     },
     {
-      "name": "velnor-runner-preview-0.1.274.preview.63+5eccf68-arm64.deb",
-      "sha256": "f72def470be47541e6c1bdf4cff47c3bb7f0cf1f66dff110e41d640364726932"
+      "name": "velnor-runner-preview-0.1.274.preview.71+b2d5159-arm64.deb",
+      "sha256": "e76fff403411d6d482d6f5247e8e546f0041cffed6da71d3b210af3728b6c305"
     }
   ],
   "schema": "velnor.apt-package-state.v1",
-  "source_commit": "5eccf68831c0e7e53971c5c168c7eafcda54c6d0",
+  "source_commit": "b2d5159f1639835819cf34ea9447614ff6d2e188",
   "source_ref": "refs/heads/main",
   "source_repository": "tailrocks/velnor",
-  "version": "0.1.274~preview.63+5eccf68"
+  "version": "0.1.274~preview.71+b2d5159"
 }
