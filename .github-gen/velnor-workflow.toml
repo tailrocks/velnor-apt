@@ -2,7 +2,7 @@ schema = 1
 
 [generator]
 repository = "tailrocks/velnor-apt"
-revision = "e13bce4dba15ed5927effde5eb62e8ba453bf100"
+revision = "e05aee6de1d1614d752b4d1b1d26a49ac2c5ef91"
 
 [workflow]
 profile = "apt-repository"
@@ -11,49 +11,10 @@ automatic = "both"
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 default_branch = "main"
+files = ["ci-unit-docs.yml"]
 
 [[units]]
 id = "docs"
 label = "Documentation"
 kind = "docs"
 root = "."
-
-[[static_files]]
-file = ".github/workflows/ci.yml"
-source = ".github-gen/sources/workflows/ci.yml"
-
-[[static_files]]
-file = ".github/workflows/ci-apt.yml"
-source = ".github-gen/sources/workflows/ci-apt.yml"
-
-[[static_files]]
-file = ".github/workflows/package-update.yml"
-source = ".github-gen/sources/workflows/package-update.yml"
-
-[[static_files]]
-file = ".github/workflows/package-updater.yml"
-source = ".github-gen/sources/workflows/package-updater.yml"
-
-[[static_files]]
-file = ".github/workflows/publish.yml"
-source = ".github-gen/sources/workflows/publish.yml"
-
-[[static_files]]
-file = ".github/workflows/renovate.yml"
-source = ".github-gen/sources/workflows/renovate.yml"
-
-[[static_files]]
-file = ".github/actions/aggregate/action.yml"
-source = ".github-gen/sources/actions/aggregate/action.yml"
-
-[[static_files]]
-file = ".github/actions/cache-contract/action.yml"
-source = ".github-gen/sources/actions/cache-contract/action.yml"
-
-[[static_files]]
-file = ".github/actions/run-gate/action.yml"
-source = ".github-gen/sources/actions/run-gate/action.yml"
-
-[[static_files]]
-file = ".github/workflows/AGENTS.md"
-source = ".github-gen/sources/workflows-AGENTS.md"
