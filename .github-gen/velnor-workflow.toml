@@ -2,7 +2,7 @@ schema = 1
 
 [generator]
 repository = "tailrocks/velnor-apt"
-revision = "03f9409b3f649a8973169dde0ebba3fe58a92ac9"
+revision = "e13bce4dba15ed5927effde5eb62e8ba453bf100"
 
 [workflow]
 profile = "apt-repository"
@@ -11,7 +11,6 @@ automatic = "both"
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 default_branch = "main"
-files = ["ci.yml", "ci-apt.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
 
 [[units]]
 id = "docs"
