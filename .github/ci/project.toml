@@ -14,7 +14,7 @@ limitations = ["Project code, build scripts, task runners, and commands are neve
 [workflow]
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
-files = ["ci-apt.yml", "ci-unit-docs.yml", "ci.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
+files = ["ci-main.yml", "ci-policy.yml", "ci-pr.yml", "ci-unit-docs.yml", "maintenance.yml", "nightly.yml"]
 
 [release]
 enabled = false
