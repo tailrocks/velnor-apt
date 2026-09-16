@@ -14,7 +14,7 @@ limitations = ["Project code, build scripts, task runners, and commands are neve
 [workflow]
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
-files = ["ci-apt.yml", "ci.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
+files = ["ci-apt.yml", "ci-unit-docs.yml", "ci.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
 
 [release]
 enabled = false
@@ -25,11 +25,8 @@ id = "docs"
 label = "Documentation"
 kind = "docs"
 root = "."
-watch = ["**/*.md", "docs/**", "mkdocs.yml"]
-github_pr_commands = ["npx --yes markdownlint-cli2@0.20.0 \"**/*.md\" \"#node_modules\" \"#**/AGENTS.md\" \"#**/CLAUDE.md\" \"#target\" \"#**/target/**\" \"#dist\" \"#coverage\" \"#**/.cache/**\""]
-github_full_commands = ["npx --yes markdownlint-cli2@0.20.0 \"**/*.md\" \"#node_modules\" \"#**/AGENTS.md\" \"#**/CLAUDE.md\" \"#target\" \"#**/target/**\" \"#dist\" \"#coverage\" \"#**/.cache/**\""]
-velnor_pr_commands = ["npx --yes markdownlint-cli2@0.20.0 \"**/*.md\" \"#node_modules\" \"#**/AGENTS.md\" \"#**/CLAUDE.md\" \"#target\" \"#**/target/**\" \"#dist\" \"#coverage\" \"#**/.cache/**\""]
-velnor_full_commands = ["npx --yes markdownlint-cli2@0.20.0 \"**/*.md\" \"#node_modules\" \"#**/AGENTS.md\" \"#**/CLAUDE.md\" \"#target\" \"#**/target/**\" \"#dist\" \"#coverage\" \"#**/.cache/**\""]
-[unit.cache]
-key_files = ["package-lock.json", "bun.lock"]
-paths = ["~/.npm"]
+watch = []
+github_pr_commands = []
+github_full_commands = []
+velnor_pr_commands = []
+velnor_full_commands = []
