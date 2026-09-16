@@ -2,18 +2,46 @@ schema = 1
 
 [generator]
 repository = "tailrocks/velnor-apt"
+revision = "03f9409b3f649a8973169dde0ebba3fe58a92ac9"
 
 [workflow]
 profile = "apt-repository"
+runners = "both"
+automatic = "both"
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
-templates = ".github-gen/generated-templates"
+default_branch = "main"
+files = ["ci.yml", "ci-apt.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
 
-[workflow.package_update_channels]
-jackin_project = ["stable", "preview"]
-tailrocks = ["stable", "preview"]
-chainargos = ["stable"]
-default = ["stable"]
+[[units]]
+id = "docs"
+label = "Documentation"
+kind = "docs"
+root = "."
+
+[[static_files]]
+file = ".github/workflows/ci.yml"
+source = ".github-gen/sources/workflows/ci.yml"
+
+[[static_files]]
+file = ".github/workflows/ci-apt.yml"
+source = ".github-gen/sources/workflows/ci-apt.yml"
+
+[[static_files]]
+file = ".github/workflows/package-update.yml"
+source = ".github-gen/sources/workflows/package-update.yml"
+
+[[static_files]]
+file = ".github/workflows/package-updater.yml"
+source = ".github-gen/sources/workflows/package-updater.yml"
+
+[[static_files]]
+file = ".github/workflows/publish.yml"
+source = ".github-gen/sources/workflows/publish.yml"
+
+[[static_files]]
+file = ".github/workflows/renovate.yml"
+source = ".github-gen/sources/workflows/renovate.yml"
 
 [[static_files]]
 file = ".github/actions/aggregate/action.yml"
