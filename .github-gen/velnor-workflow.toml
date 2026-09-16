@@ -13,6 +13,10 @@ velnor_labels = ["self-hosted", "velnor-target-mvp"]
 default_branch = "main"
 files = ["ci-unit-docs.yml"]
 
+[policy]
+ruleset_required_status_checks = ["ci-required"]
+ruleset_external_status_checks = ["DCO"]
+
 [[units]]
 id = "docs"
 label = "Documentation"
