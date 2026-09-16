@@ -2,7 +2,7 @@ schema = 1
 
 [generator]
 repository = "tailrocks/velnor-apt"
-revision = "e05aee6de1d1614d752b4d1b1d26a49ac2c5ef91"
+revision = "2678913a8e3db842a2f92e82e2e1119fae7dad35"
 
 [workflow]
 profile = "apt-repository"
