@@ -47,25 +47,25 @@ published here; `apt upgrade` picks it up.
 1. [Velnor](https://github.com/tailrocks/velnor) builds both architecture
    packages, immutable OCI image, manifest, checksums, and one release record
    from the same tagged commit.
-2. [`publish.yml`](.github/workflows/publish.yml) downloads those source-owned
-   assets directly. It independently resolves the tag and verifies every
-   package, manifest, image, signer, and record digest before `reprepro`.
+2. [`release.yml`](.github/workflows/release.yml) (the `Package feed` workflow)
+   downloads those source-owned assets directly. It independently resolves the
+   tag and verifies every package, manifest, image, signer, and record digest
+   before the published index is assembled.
 3. Publication retains the exact previously signed package pair for rollback,
    signs fresh repository metadata plus a publication record, and deploys only
-   the verified Pages artifact. Velnor is the default execution lane; operators
-   may explicitly select GitHub or both lanes. Pages always uses GitHub Actions,
-   never a branch.
-
-Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.com/tailrocks/velnor/blob/main/docs/debian-apt-repo.md).
+   the verified Pages artifact. Feed mutation publishes from GitHub-hosted
+   runners only; a Velnor-only dispatch is rejected. Pages always uses GitHub
+   Actions, never a branch.
 
 ## Release and server deployment
 
 1. Merge the signed-off Velnor release commit, then push its matching `vX.Y.Z`
    tag. The source workflow fails unless tag, crate, package, manifest, OCI, and
    source identities agree.
-2. Dispatch `Publish apt repo` with that tag. The publisher downloads only the
-   immutable source release, verifies coherence before `reprepro`, retains the
-   signed previous pair, signs the new index/publication record, then deploys.
+2. Dispatch the `Package feed` workflow with channel `stable` and version set
+   to that tag. The publisher downloads only the immutable source release,
+   verifies coherence before assembling the index, retains the signed previous
+   pair, signs the new index/publication record, then deploys.
 3. Before changing a server, verify that the signed candidate is visible:
 
    ```bash
@@ -94,6 +94,12 @@ Design and operator runbook: [velnor `docs/debian-apt-repo.md`](https://github.c
 - Set **Custom domain** to `velnor-apt.tailrocks.com`.
 - Keep the committed `velnor.gpg` fingerprint equal to the private publisher
   key. The workflow fails before publication when they differ.
+- Create the `package-feed` GitHub environment (no reviewers: publication stays
+  fully automatic once verification passes). The feed publisher's publish job
+  requires it.
+- For scheduled dependency PRs, store a fine-grained PAT (repo scope) in the
+  secret `GH_RENOVATE_TOKEN`. Without it the Renovate writer skips with a
+  notice; `renovate.json` is still validated on every PR touching it.
 
 ## Maintainer release path
 

@@ -11,7 +11,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/verify-release.sh"
-WORKFLOW="$HERE/../.github/workflows/publish.yml"
+WORKFLOW="$HERE/../.github/workflows/release.yml"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -917,22 +917,28 @@ fi
   || die "bootstrap rewrote the publication record despite a malformed previous pointer"
 ok "preview rejected: bootstrap previous pointer is not JSON null"
 
-# The source image is private. Its verifier must receive only package-read
-grep -q '^  packages: read$' "$WORKFLOW" \
-  || die "publisher lacks package-read authority"
-! grep -q '^  packages: write$' "$WORKFLOW" \
-  || die "publisher grants package-write authority"
-grep -q 'docker/login-action@dbcb813823bdd20940b903addbd779551569679f' "$WORKFLOW" \
-  || die "publisher lacks pinned GHCR authentication"
-grep -q '^          registry: ghcr.io$' "$WORKFLOW" \
-  || die "publisher authenticates the wrong registry"
-grep -Fq "          password: \${{ secrets.GITHUB_TOKEN }}" "$WORKFLOW" \
-  || die "publisher does not use the ephemeral workflow token"
-login_line="$(grep -n 'name: Authenticate source image registry' "$WORKFLOW" | cut -d: -f1)"
-verify_line="$(grep -n 'name: Verify source, package, manifest, image, and signer coherence' "$WORKFLOW" | cut -d: -f1)"
-[ "$login_line" -lt "$verify_line" ] \
-  || die "publisher authenticates after OCI verification"
-ok "private GHCR verification is authenticated with read-only authority"
+# The source image is public: live OCI verification runs anonymous `docker
+# buildx imagetools inspect`, so the generated feed publisher holds no
+# registry authority at all. Least privilege is top-level `contents: read`
+# only; if the image ever goes private again, the GENERATOR must grant the
+# verify job `packages: read` (generated YAML is never hand-edited) and this
+# case must assert it again.
+grep -q '^permissions:$' "$WORKFLOW" \
+  || die "publisher lacks a top-level permissions block"
+grep -A1 '^permissions:$' "$WORKFLOW" | grep -q '^  contents: read$' \
+  || die "publisher top-level authority is not contents-read-only"
+! grep -q 'packages:' "$WORKFLOW" \
+  || die "publisher grants unneeded registry authority for a public image"
+ok "publisher holds least authority for a public source image"
+# No registry authentication: the image is public, so anonymous inspection is
+# the whole mechanism. A login step would be dead authority (and a canary:
+# if one appears, the image-visibility assumption changed and the
+# least-authority case above must be revisited too).
+! grep -q 'docker/login-action' "$WORKFLOW" \
+  || die "publisher authenticates a public registry"
+! grep -q 'Authenticate source image registry' "$WORKFLOW" \
+  || die "publisher carries a stale registry-auth step"
+ok "public GHCR verification runs without registry authentication"
 
 # Same-version retries must preserve the already-signed rollback identity.
 # A normal new-version publish reads the root record; an idempotent retry reads
