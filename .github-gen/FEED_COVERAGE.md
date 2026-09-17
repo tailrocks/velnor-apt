@@ -20,7 +20,7 @@ tag auto-resolve drops `ls-remote` from its argv).
 | `renovate.yml` (scheduled writer) | `renovate.yml` + `renovate-validate.yml` | Writer runs on github-hosted (no trusted Velnor writer label is declared), skips with a notice until `GH_RENOVATE_TOKEN` is provisioned; config validated on PR. |
 | Composite actions (`aggregate`, `cache-contract`, `run-gate`) | Eliminated by design | Generated steps invoke the pinned `velnor-workflow` product binary + SHA-pinned external actions; no local actions exist or are referenced. |
 
-## Remaining gaps (two precise B1 defects)
+## Remaining gaps (three precise B1 defects)
 
 ### 1. Signed publication cannot complete: no GPG key import
 
@@ -37,9 +37,11 @@ Consequences:
 
 - The verify path works end to end today: dispatching `Package feed` on any
   ref proves coherence without mutation (publish/deploy skip off `main`).
-- A scheduled or dispatched publish on `main` assembles the staged suite and
-  then fails at signing. It fails closed: the live feed and Pages deployment
-  are untouched.
+- A scheduled or dispatched publish on `main` currently fails even earlier,
+  at defect 3 below (missing `incoming/…` sidecar in prior recovery) — before
+  any assembly or signing. Once defect 3 is fixed, signing (this defect) is
+  the next fail-closed stop. The live feed and Pages deployment are untouched
+  in all cases.
 - This blocks STEP B4 (signed APT publication through the generated flow),
   not the verify/CI/renovate coverage landed here.
 
@@ -69,6 +71,23 @@ every other `run_fixed`/`run_in` caller), plus a live-`ls-remote` test that
 would have caught the dropped subcommand — the existing argv unit test asserts
 the vector, never the executed command.
 
+### 3. Publish/deploy reference artifact paths the v4 download never restores
+
+The verify job uploads `path: incoming` (artifact `apt-incoming`) and the
+publish job downloads it with `path: .`, then references
+`incoming/release-record.json.sha256` — but the v4 download restores the
+files without the `incoming/` prefix, so prior recovery fails with
+`awk: fatal: cannot open file 'incoming/release-record.json.sha256'`.
+Proven live: dispatch `35280645007` (stable, `v0.1.274`, explicit commit)
+went Verify success → Publish failure at exactly that line, Deploy skipped,
+Feed result fail-closed. The deploy job carries the identical broken pattern
+(upload `path: public`, download `path: .`, reference `public/…`).
+
+Fix direction (generator): download each artifact into its expected directory
+(`path: incoming` / `path: public`) instead of `path: .`, or reference the
+flattened layout — plus a layout assertion test. Like defects 1–2, the fix
+changes the generator closure and ships as a new product + pin.
+
 ## Verify-path proof (B2, live inputs, verified product binary)
 
 Exact `release.yml` verify-job command sequence against the live
@@ -86,3 +105,10 @@ Exact `release.yml` verify-job command sequence against the live
   signer `7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801`.
 - `apt-verify … --verify-oci true`: "stable feed inputs are coherent"
   (record/manifest/deb/identity/live-OCI-index checks all pass).
+
+The same sequence also passes inside CI: dispatch `35280645007` on main
+(runner `github`, channel `stable`, version `v0.1.274`, explicit commit)
+completed Admit success → **Verify apt feed success** ("stable feed inputs
+are coherent" in the job log, `apt-incoming` uploaded) → Publish failure
+(defect 3, fail-closed) → Deploy skipped → Feed result fail-closed. Policy
+dispatch `35280641908` on main completed Policy success (11/11).
