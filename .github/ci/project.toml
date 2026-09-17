@@ -9,16 +9,24 @@ runners = "both"
 [analysis]
 method = "static-filesystem-and-manifest-inspection"
 detected = ["renovate-configuration"]
-limitations = ["Project code, build scripts, task runners, and commands are never executed during analysis.", "Release, signing, registry, deployment, branch-protection, and runner-capability contracts remain explicit manual inputs.", "Renovate credentials, runner placement, and write permissions cannot be inferred from repository files."]
+limitations = ["Project code, build scripts, task runners, and commands are never executed during analysis.", "Release, signing, registry, deployment, branch-protection, and runner-capability contracts remain explicit manual inputs."]
 
 [workflow]
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
-files = ["ci-unit-docs.yml"]
+files = ["ci-main.yml", "ci-policy.yml", "ci-pr.yml", "ci-unit-docs.yml", "maintenance.yml", "nightly.yml", "release.yml", "renovate-validate.yml", "renovate.yml"]
 
 [release]
-enabled = false
-reason = "Release is fail-closed. Enable only after declaring immutable artifact, registry, provenance, and tag-protection policy."
+enabled = true
+reason = "APT feed publisher: verify-before-mutation feed workflow for the velnor-runner Debian repository."
+kind = "apt"
+package = "velnor-runner"
+packages = []
+binary = "velnor-runner"
+targets = []
+source_repository = "tailrocks/velnor"
+consumer_repository = "tailrocks/velnor-apt"
+description = "apt repository for the Velnor self-hosted GitHub Actions runner"
 
 [[unit]]
 id = "docs"
@@ -26,7 +34,7 @@ label = "Documentation"
 kind = "docs"
 root = "."
 watch = []
-github_pr_commands = []
-github_full_commands = []
-velnor_pr_commands = []
-velnor_full_commands = []
+github_pr_commands = ["mise run check"]
+github_full_commands = ["mise run check"]
+velnor_pr_commands = ["mise run check"]
+velnor_full_commands = ["mise run check"]
