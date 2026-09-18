@@ -71,11 +71,11 @@ jobs:
       - name: Set up Velnor workflow runtime
         id: runtime
         if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@048a7bdaed8240cf652127c94434e60528633dec
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
         with:
-          rev: 048a7bdaed8240cf652127c94434e60528633dec
+          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=048a7bdaed8240cf652127c94434e60528633dec" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
       - name: Enforce workflow policy
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -166,16 +166,16 @@ jobs:
       - name: Set up Velnor workflow runtime
         id: runtime
         if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@048a7bdaed8240cf652127c94434e60528633dec
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
         with:
-          rev: 048a7bdaed8240cf652127c94434e60528633dec
+          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=048a7bdaed8240cf652127c94434e60528633dec" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
       - name: Download verified feed inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: apt-incoming
-          path: .
+          path: incoming
       - name: Recover the prior pair and derive the previous pointer
         id: prior
         env:
@@ -226,9 +226,10 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
           COMMIT: ${{ needs.verify.outputs.commit }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          args=(--suite "$CHANNEL" --source-repo 'tailrocks/velnor' --package 'velnor-runner' --binary 'velnor-runner' --consumer-repo 'tailrocks/velnor-apt' --manifest-schema 'velnor.package-release.v1' --identity-dir 'velnor' --keyring 'velnor.gpg' --origin 'Velnor' --description 'apt repository for the Velnor self-hosted GitHub Actions runner' --feed-url 'https://velnor-apt.tailrocks.com' --signer '7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801' --passphrase-env APT_GPG_PASSPHRASE --version "$VERSION" --incoming incoming --previous-pointer previous-pointer.json --staging public)
+          args=(--suite "$CHANNEL" --source-repo 'tailrocks/velnor' --package 'velnor-runner' --binary 'velnor-runner' --consumer-repo 'tailrocks/velnor-apt' --manifest-schema 'velnor.package-release.v1' --identity-dir 'velnor' --keyring 'velnor.gpg' --origin 'Velnor' --description 'apt repository for the Velnor self-hosted GitHub Actions runner' --feed-url 'https://velnor-apt.tailrocks.com' --signer '7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801' --passphrase-env APT_GPG_PASSPHRASE --key-env APT_GPG_PRIVATE_KEY --version "$VERSION" --incoming incoming --previous-pointer previous-pointer.json --staging public)
           if [ "${{ steps.prior.outputs.bootstrap }}" = true ]; then
             args+=(--bootstrap true)
           else
@@ -269,16 +270,16 @@ jobs:
       - name: Set up Velnor workflow runtime
         id: runtime
         if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@048a7bdaed8240cf652127c94434e60528633dec
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
         with:
-          rev: 048a7bdaed8240cf652127c94434e60528633dec
+          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=048a7bdaed8240cf652127c94434e60528633dec" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
       - name: Download staged feed tree
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: apt-staging
-          path: .
+          path: public
       - name: Guard against a rollback deploy
         env:
           CHANNEL: ${{ needs.publish.outputs.channel }}

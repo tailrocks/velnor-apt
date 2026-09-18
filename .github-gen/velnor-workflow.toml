@@ -8,7 +8,7 @@ repository = "tailrocks/velnor-apt"
 # main may advance without generator changes and reuse this product with an
 # identical closure (e.g. the 19811e71 recovery merge reuses 048a7bda's
 # velnor-workflow-runtime-v1-32565cc6272a84d4 byte for byte).
-revision = "048a7bdaed8240cf652127c94434e60528633dec"
+revision = "fdeed261bd2247a38db6922a7726cd45d3d6f31e"
 
 [workflow]
 profile = "apt-repository"
@@ -40,6 +40,7 @@ consumer_repository = "tailrocks/velnor-apt"
 manifest_schema = "velnor.package-release.v1"
 signer_fingerprint = "7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801"
 passphrase_secret = "APT_GPG_PASSPHRASE"
+signing_key_secret = "APT_GPG_PRIVATE_KEY"
 keyring_path = "velnor.gpg"
 apt_origin = "Velnor"
 apt_feed_url = "https://velnor-apt.tailrocks.com"
