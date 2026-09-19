@@ -15,7 +15,7 @@ run = "actionlint"
 # tests. shellcheck catches shell defects; the fixture test proves verify-release
 # accepts a coherent release and rejects every incoherent one before reprepro.
 [tasks.shellcheck]
-run = "shellcheck scripts/verify-release.sh scripts/test-verify-release.sh"
+run = "shellcheck scripts/verify-release.sh scripts/test-verify-release.sh scripts/release-discovery.sh scripts/test-release-discovery.sh"
 
 [tasks.verify-release-test]
 run = "scripts/test-verify-release.sh"
@@ -26,12 +26,15 @@ run = "./scripts/package-update.sh"
 [tasks.package-update-test]
 run = "./scripts/test-package-update.sh"
 
+[tasks.release-discovery-test]
+run = "./scripts/test-release-discovery.sh"
+
 # Gate contract (ci-apt.yml runs install/build/test/lint/format as separate
 # steps): every gate reaches exactly one disjoint leaf set, so each leaf runs
 # once per CI lane. `check` stays the depends-only human aggregate. The former
 # build->check and fmt->check edges re-ran all four leaves 3x per lane.
 [tasks.check]
-depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test"]
+depends = ["actionlint", "shellcheck", "verify-release-test", "package-update-test", "release-discovery-test"]
 
 # The shared Velnor apt workflow invokes this fleet contract before its
 # disjoint leaf gates. Keep the alias real and rooted in the repository's
