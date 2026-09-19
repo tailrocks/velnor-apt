@@ -27,6 +27,21 @@ case "$*" in
     if env | rg -q '^FAKE_REF_MISMATCH=1$'; then commit=ffffffffffffffffffffffffffffffffffffffff; fi
     jq -cn --arg commit "$commit" '{object:{type:"commit",sha:$commit}}'
     ;;
+  *"/compare/main..."*)
+    commit=$(printf '%s\n' "$endpoint" | sed 's#^.*/compare/main\.\.\.##')
+    case "${FAKE_PREVIEW_BRANCH_MODE:-behind}" in
+      behind)
+        jq -cn --arg commit "$commit" '{status:"behind",base_commit:{sha:("8888888888888888888888888888888888888888")},merge_base_commit:{sha:$commit}}'
+        ;;
+      identical)
+        jq -cn --arg commit "$commit" '{status:"identical",base_commit:{sha:$commit},merge_base_commit:{sha:$commit}}'
+        ;;
+      non-ancestor)
+        jq -cn --arg commit "$commit" '{status:"diverged",base_commit:{sha:("8888888888888888888888888888888888888888")},merge_base_commit:{sha:("7777777777777777777777777777777777777777")}}'
+        ;;
+      *) echo "unknown FAKE_PREVIEW_BRANCH_MODE" >&2; exit 2 ;;
+    esac
+    ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 SH
@@ -187,7 +202,9 @@ printf preview-retained > "$work/package-state-preview.json"
 before_stable=$(sha256 "$work/package-state.json")
 before_preview=$(sha256 "$work/package-state-preview.json")
 (cd "$work" && "$script" --channel preview > preview.json)
-jq -e --arg version "$pver" --arg commit "$pcommit" '.tag=="preview-"+$commit and .version==$version and .source_ref=="refs/heads/main" and .source_commit==$commit' "$work/preview.json" >/dev/null
+jq -e --arg version "$pver" --arg commit "$pcommit" '.tag=="preview-"+$commit and .version==$version and .source_ref=="refs/heads/main" and .source_commit==$commit and .source_ref_resolution.proof_ref==("refs/tags/preview-"+$commit) and .source_ref_resolution.declared_ref_provenance.ref=="refs/heads/main" and .source_ref_resolution.declared_ref_provenance.relation=="ancestor" and .source_ref_resolution.declared_ref_provenance.merge_base_commit==$commit' "$work/preview.json" >/dev/null
+(cd "$work" && expect_failure preview-source-not-ancestor env FAKE_PREVIEW_BRANCH_MODE=non-ancestor "$script" --channel preview)
+grep -F 'no eligible preview application release' "$work/preview-source-not-ancestor.stderr" >/dev/null
 [ "$(sha256 "$work/package-state.json")" = "$before_stable" ]
 [ "$(sha256 "$work/package-state-preview.json")" = "$before_preview" ]
 
@@ -214,10 +231,10 @@ grep -F 'no eligible preview application release' "$work/rolling-preview.stderr"
 
 # Hostile mutations stay internally byte-addressed where practical. Each
 # mutation must make the typed application candidate ineligible.
-for path in 222 223 224 225 22201 22202; do cp "$work/manifests/$path" "$work/baseline-$path"; done
+for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/manifests/$path" "$work/baseline-$path"; done
 cp "$work/releases/222" "$work/baseline-release-222"
 restore_candidate() {
-  for path in 222 223 224 225 22201 22202; do cp "$work/baseline-$path" "$work/manifests/$path"; done
+  for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/baseline-$path" "$work/manifests/$path"; done
   cp "$work/baseline-release-222" "$work/releases/222"
   jq -s -c . "$work/releases/222" > "$work/pages.json"
 }
@@ -283,5 +300,22 @@ jq '.release_id = "bad release id"' "$work/manifests/222" > "$work/manifests/222
 mv "$work/manifests/222.tmp" "$work/manifests/222"
 sha256 "$work/manifests/222" > "$work/manifests/223"
 expect_failure release-id-grammar "$script" --channel stable
+
+restore_candidate
+jq '.version = 999' "$work/manifests/226" > "$work/manifests/226.tmp"
+mv "$work/manifests/226.tmp" "$work/manifests/226"
+sha256 "$work/manifests/226" > "$work/manifests/22203"
+expect_failure package-manifest-version "$script" --channel stable
+
+restore_candidate
+jq '.crate_version = "evil"' "$work/manifests/226" > "$work/manifests/226.tmp"
+mv "$work/manifests/226.tmp" "$work/manifests/226"
+sha256 "$work/manifests/226" > "$work/manifests/22203"
+expect_failure package-manifest-crate-version "$script" --channel stable
+
+restore_candidate
+jq '.html_url = "https://evil.example/release"' "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+expect_failure release-url-origin "$script" --channel stable
 
 echo 'release discovery checks passed'
