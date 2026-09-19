@@ -13,6 +13,10 @@ PRODUCT_MANIFEST_ASSET="product-manifest.json"
 RELEASE_RECORD_SCHEMA="velnor.release-record/v1"
 PACKAGE_RELEASE_SCHEMA="velnor.package-release.v1"
 APT_ARTIFACT_KIND="apt-package"
+# Producer-owned release IDs are immutable provider identities. This grammar
+# deliberately permits repository-qualified IDs (`owner/repo/...`); Homebrew
+# must consume this same pattern rather than silently narrowing it.
+RELEASE_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._:/-]*$'
 CHANNEL="stable"
 REQUESTED_VERSION=""
 
@@ -159,6 +163,36 @@ fetch_asset() {
     || fail "GitHub API failed while fetching $label asset $asset_id"
 }
 
+resolve_immutable_release_ref() {
+  # target_commitish is release metadata, not a source-of-truth ref. Resolve
+  # the immutable release tag through GitHub's ref API and compare its commit
+  # with the release and canonical manifest before accepting the candidate.
+  local tag="$1" ref_json object_type object_sha tag_json
+  ref_json="$(gh api \
+    --header 'Accept: application/vnd.github+json' \
+    "repos/$SOURCE_REPOSITORY/git/ref/tags/$tag")" || return 1
+  object_type="$(jq -er '.object.type | strings' <<<"$ref_json")" || return 1
+  object_sha="$(jq -er '.object.sha | strings' <<<"$ref_json")" || return 1
+  case "$object_type" in
+    commit)
+      valid_source_commit "$object_sha" || return 1
+      printf '%s\n' "$object_sha"
+      ;;
+    tag)
+      tag_json="$(gh api \
+        --header 'Accept: application/vnd.github+json' \
+        "repos/$SOURCE_REPOSITORY/git/tags/$object_sha")" || return 1
+      [ "$(jq -er '.object.type | strings' <<<"$tag_json")" = commit ] || return 1
+      object_sha="$(jq -er '.object.sha | strings' <<<"$tag_json")" || return 1
+      valid_source_commit "$object_sha" || return 1
+      printf '%s\n' "$object_sha"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 release_asset_id() {
   local release="$1" name="$2"
   jq -er --arg name "$name" \
@@ -185,8 +219,17 @@ release_assets_are_well_formed() {
       ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$"))) and
       (.state == "uploaded") and
       ((.size | type) == "number" and .size > 0) and
-      ((.id | type) == "number" and .id > 0)
+      ((.id | type) == "number" and .id > 0) and
+      (.browser_download_url | type == "string" and test("^https://[^[:space:]]+$"))
     )
+  ' <<<"$release" >/dev/null
+}
+
+release_asset_urls_are_canonical() {
+  local release="$1" tag="$2" base
+  base="https://github.com/$SOURCE_REPOSITORY/releases/download/$tag/"
+  jq -e --arg base "$base" '
+    all(.assets[]; .browser_download_url == ($base + .name))
   ' <<<"$release" >/dev/null
 }
 
@@ -196,6 +239,7 @@ manifest_assets_are_well_formed() {
     ((.artifacts | type) == "array" and (.artifacts | length) > 0) and
     ([.artifacts[].name] | (length == (unique | length))) and
     all(.artifacts[];
+      ((keys | sort) == ["kind","name","sha256","size","target"]) and
       ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$"))) and
       (.target | type == "string" and
         (. == "x86_64-unknown-linux-gnu" or
@@ -250,6 +294,60 @@ validate_asset_sidecar() {
   [ "$actual" = "$expected" ]
 }
 
+validate_manifest_artifact_bytes() {
+  local release="$1" manifest_file="$2"
+  local artifact_name artifact_sha artifact_size
+  while IFS=$'\t' read -r artifact_name artifact_sha artifact_size; do
+    [ -n "$artifact_name" ] || return 1
+    local asset_id payload_file actual_sha actual_size release_size
+    asset_id="$(release_asset_id "$release" "$artifact_name")" || return 1
+    payload_file="$tmp_dir/product-artifact-$asset_id"
+    fetch_asset "$asset_id" "$payload_file" "$artifact_name"
+    actual_sha="$(sha256_file "$payload_file")"
+    actual_size="$(wc -c < "$payload_file" | tr -d '[:space:]')"
+    release_size="$(jq -er --arg name "$artifact_name" \
+      '[.assets[] | select(.name == $name)] | .[0].size' <<<"$release")" || return 1
+    [ "$actual_sha" = "$artifact_sha" ] || return 1
+    [ "$actual_size" = "$artifact_size" ] || return 1
+    [ "$release_size" = "$artifact_size" ] || return 1
+  done < <(jq -r '.artifacts[] | [.name,.sha256,(.size | tostring)] | @tsv' "$manifest_file")
+}
+
+validate_sha256sums() {
+  local release="$1" manifest_file="$2" sums_id sums_file sums_count
+  sums_id="$(release_asset_id "$release" SHA256SUMS)" || return 1
+  sums_file="$tmp_dir/sha256sums-$sums_id.txt"
+  fetch_asset "$sums_id" "$sums_file" SHA256SUMS
+  sums_count="$(awk 'NF { if (NF != 2) bad = 1; count++ }
+    END { if (bad || count != 2) exit 1; print count }' "$sums_file")" || return 1
+  [ "$sums_count" = 2 ] || return 1
+  local apt_count
+  apt_count="$(jq -er --arg kind "$APT_ARTIFACT_KIND" \
+    '[.artifacts[] | select(.kind == $kind and
+      (.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-unknown-linux-gnu"))] | length' \
+    "$manifest_file")" || return 1
+  [ "$apt_count" = 2 ] || return 1
+
+  local artifact_name expected_sha sums_sha sidecar_id sidecar_file sidecar_sha
+  while IFS=$'\t' read -r artifact_name expected_sha; do
+    [ -n "$artifact_name" ] || return 1
+    sums_sha="$(awk -v name="$artifact_name" \
+      '$2 == name { count++; value = $1 } END { if (count != 1) exit 1; print value }' \
+      "$sums_file")" || return 1
+    valid_sha256 "$sums_sha" || return 1
+    [ "$sums_sha" = "$expected_sha" ] || return 1
+    sidecar_id="$(release_asset_id "$release" "$artifact_name.sha256")" || return 1
+    sidecar_file="$tmp_dir/sha256sums-sidecar-$sidecar_id.txt"
+    fetch_asset "$sidecar_id" "$sidecar_file" "$artifact_name.sha256"
+    sidecar_sha="$(read_sidecar_digest "$sidecar_file" "$artifact_name")" || return 1
+    [ "$sidecar_sha" = "$sums_sha" ] || return 1
+  done < <(jq -r --arg kind "$APT_ARTIFACT_KIND" \
+    '[.artifacts[] | select(.kind == $kind and
+      (.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-unknown-linux-gnu"))]
+     | if length == 2 then sort_by(.name)[] | [.name,.sha256] | @tsv else error("APT inventory must contain exactly two artifacts") end' \
+    "$manifest_file")
+}
+
 parent_manifest_digest() {
   local file="$1"
   jq -er '
@@ -259,8 +357,8 @@ parent_manifest_digest() {
 }
 
 validate_subordinate_records() {
-  local release="$1" tag="$2" source_ref="$3" source_commit="$4" version="$5" manifest_sha="$6"
-  local release_manifest_id record_file release_manifest_file package_file
+  local release="$1" tag="$2" source_ref="$3" source_commit="$4" version="$5" manifest_sha="$6" product_manifest_file="$7"
+  local release_manifest_id record_file release_manifest_file package_file package_sha expected_assets actual_assets
 
   release_manifest_id="$(release_asset_id "$release" release-manifest.json)" || return 1
   release_manifest_file="$tmp_dir/release-manifest-$release_manifest_id.json"
@@ -271,28 +369,71 @@ validate_subordinate_records() {
   [ "$(parent_manifest_digest "$record_file")" = "$manifest_sha" ] || return 1
   [ "$(parent_manifest_digest "$release_manifest_file")" = "$manifest_sha" ] || return 1
   [ "$(parent_manifest_digest "$package_file")" = "$manifest_sha" ] || return 1
+  package_sha="$(sha256_file "$package_file")"
+  expected_assets="$(jq -S --arg kind "$APT_ARTIFACT_KIND" '
+    [.artifacts[] | select(.kind == $kind and
+      (.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-unknown-linux-gnu")) |
+      {name,sha256}] | sort_by(.name)
+  ' "$product_manifest_file")" || return 1
+  actual_assets="$(jq -S '.assets' "$release_manifest_file")" || return 1
+  [ "$actual_assets" = "$expected_assets" ] || return 1
 
   jq -e \
     --arg schema "$RELEASE_RECORD_SCHEMA" --arg repository "$SOURCE_REPOSITORY" \
     --arg tag "$tag" --arg source_commit "$source_commit" --arg version "$version" \
-    --arg manifest_sha "$manifest_sha" \
+    --arg manifest_sha "$manifest_sha" --arg package_sha "$package_sha" --arg suite "$CHANNEL" \
     '(.schema == $schema) and
      (.parent_manifest_sha256 == $manifest_sha) and
      (.build.repository == $repository) and (.build.tag == $tag) and
      (.build.commit == $source_commit) and
      (.build.crate_version == $version) and
      (.build.debian_version == $version) and
-     (.build.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$"))' \
+     (.build.manifest_version | type == "number" and floor == . and . > 0) and
+     (.build.manifest_sha256 == $package_sha) and
+     (.architectures | type == "array" and length == 2) and
+     ([.architectures[].arch] | sort) == ["amd64","arm64"] and
+     all(.architectures[];
+       (keys | sort) == ["arch","binary_sha256","deb_sha256","oci_platform_digest","target"] and
+       ((.arch == "amd64" and .target == "x86_64-unknown-linux-gnu") or
+        (.arch == "arm64" and .target == "aarch64-unknown-linux-gnu")) and
+       (.binary_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+       (.deb_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+       (.oci_platform_digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))
+     ) and
+     (.oci_index_digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+     (.oci_image_ref | type == "string" and length > 0) and
+     (.oci_labels | type == "object" and
+       .version == $version and .revision == $source_commit and
+       (.manifest_sha256 == $package_sha)) and
+     (.apt | type == "object" and .suite == $suite and .component == "main")' \
     "$record_file" >/dev/null || return 1
+  local record_arch expected_target expected_deb actual_deb
+  for record_arch in amd64 arm64; do
+    if [ "$record_arch" = amd64 ]; then
+      expected_target=x86_64-unknown-linux-gnu
+    else
+      expected_target=aarch64-unknown-linux-gnu
+    fi
+    expected_deb="$(jq -er --arg kind "$APT_ARTIFACT_KIND" --arg target "$expected_target" \
+      '[.artifacts[] | select(.kind == $kind and .target == $target)] | .[0].sha256' \
+      "$product_manifest_file")" || return 1
+    actual_deb="$(jq -er --arg arch "$record_arch" \
+      '.architectures[] | select(.arch == $arch) | .deb_sha256' "$record_file")" || return 1
+    [ "$actual_deb" = "$expected_deb" ] || return 1
+  done
   jq -e \
     --arg schema "$PACKAGE_RELEASE_SCHEMA" --arg repository "$SOURCE_REPOSITORY" \
     --arg source_ref "$source_ref" \
     --arg source_commit "$source_commit" --arg version "$version" \
     --arg manifest_sha "$manifest_sha" \
-    '(.schema == $schema) and
+    '((keys | sort) == ["assets","parent_manifest_sha256","schema","source_commit","source_ref","source_repository","version"]) and
+     (.schema == $schema) and
      (.parent_manifest_sha256 == $manifest_sha) and
      (.source_repository == $repository) and (.source_ref == $source_ref) and
-     (.source_commit == $source_commit) and (.version == $version)' \
+    (.source_commit == $source_commit) and (.version == $version) and
+    (.assets | type == "array" and length == 2) and
+    all(.assets[]; (keys | sort) == ["name","sha256"] and
+      (.name | type == "string") and (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))' \
     "$release_manifest_file" >/dev/null || return 1
   jq -e \
     --arg manifest_sha "$manifest_sha" --arg source_commit "$source_commit" \
@@ -310,11 +451,12 @@ validate_product_manifest() {
     --arg repository "$SOURCE_REPOSITORY" --arg expected_ref "$source_ref" \
     --arg expected_commit "$source_commit" --arg expected_tag "$tag" \
     --arg expected_version "$version" --arg channel "$CHANNEL" \
+    --arg release_id_pattern "$RELEASE_ID_PATTERN" \
     '((keys | sort) == ["artifacts","channel","components","product_id","release_id","release_tag","schema","source_commit","source_ref","source_repository","version"]) and
      .schema == $schema and .product_id == $product and .channel == $channel and
      .source_repository == $repository and .source_ref == $expected_ref and
      .source_commit == $expected_commit and .release_tag == $expected_tag and
-     (.release_id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]*$")) and
+     (.release_id | type == "string" and test($release_id_pattern)) and
      .version == $expected_version and
      (.source_commit | test("^[0-9a-f]{40}$")) and
      (.version | if $channel == "stable" then test("^[0-9]+\\.[0-9]+\\.[0-9]+$")
@@ -333,18 +475,12 @@ validate_product_manifest() {
     ([.components[].name] | sort) == ["velnor-runner","velnor-workflow","velnorctl"] and
     all(.components[];
       (keys | sort) == ["binary","crate","name","targets","version"] and
-      .name == .crate and
-      (.binary | type == "string" and test("^[A-Za-z0-9._+-]+$")) and
+      ((.name == "velnor-runner" and .crate == "velnor-runner" and .binary == "velnor-runner") or
+       (.name == "velnorctl" and .crate == "velnorctl" and .binary == "velnorctl") or
+       (.name == "velnor-workflow" and .crate == "velnor-workflow" and .binary == "velnor-workflow")) and
       (.version | type == "string") and
       (.targets | type == "array" and
-        (. | length > 0 and length == (unique | length) and
-          all(.[];
-            . == "x86_64-unknown-linux-gnu" or
-            . == "aarch64-unknown-linux-gnu" or
-            . == "aarch64-apple-darwin" or
-            . == "x86_64-apple-darwin") and
-          index("x86_64-unknown-linux-gnu") != null and
-          index("aarch64-unknown-linux-gnu") != null))
+        (sort == ["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-unknown-linux-gnu"]))
     )
   ' "$manifest_file" >/dev/null 2>/dev/null || return 1
 
@@ -381,6 +517,13 @@ validate_product_manifest() {
     '[.assets[].name | select(startswith($package) and test("[.]deb([.]sha256)?$"))] | sort == $expected' \
     <<<"$release" >/dev/null || return 1
 
+  # Every canonical artifact row is independently bound to the bytes served by
+  # this immutable release. APT sidecars and SHA256SUMS add the package-format
+  # proofs below; non-APT rows are still verified here rather than silently
+  # being presented as part of an unverified product release.
+  validate_manifest_artifact_bytes "$release" "$manifest_file" || return 1
+  validate_sha256sums "$release" "$manifest_file" || return 1
+
   while IFS=$'\t' read -r artifact_name artifact_size; do
     local release_size
     release_size="$(jq -er --arg name "$artifact_name" '[.assets[] | select(.name == $name)] | .[0].size' <<<"$release")" || return 1
@@ -395,6 +538,7 @@ validate_product_manifest() {
 validate_candidate() {
   local release="$1"
   local tag version source_ref source_commit manifest_id manifest_file manifest_sha preview_tag_commit
+  local resolved_source_commit
   local prerelease draft
 
   release_assets_are_well_formed "$release" || return 1
@@ -428,6 +572,9 @@ validate_candidate() {
   if [ "$CHANNEL" = preview ]; then
     [ "$source_commit" = "$preview_tag_commit" ] || return 1
   fi
+  release_asset_urls_are_canonical "$release" "$tag" || return 1
+  resolved_source_commit="$(resolve_immutable_release_ref "$tag")" || return 1
+  [ "$resolved_source_commit" = "$source_commit" ] || return 1
 
   manifest_id="$(release_asset_id "$release" "$PRODUCT_MANIFEST_ASSET")" || return 1
   manifest_file="$tmp_dir/product-manifest-$manifest_id.json"
@@ -452,7 +599,7 @@ validate_candidate() {
     manifest.json.sha256; do
     release_asset_is_complete "$release" "$required_asset" || return 1
   done
-  validate_subordinate_records "$release" "$tag" "$source_ref" "$source_commit" "$version" "$manifest_sha" || return 1
+  validate_subordinate_records "$release" "$tag" "$source_ref" "$source_commit" "$version" "$manifest_sha" "$manifest_file" || return 1
 
   jq -S -c \
     --arg channel "$CHANNEL" \
@@ -489,6 +636,11 @@ validate_candidate() {
       published_at: .published_at,
       target_commitish: .target_commitish,
       release_assets: $release_assets,
+      source_ref_resolution: {
+        proof_ref: ("refs/tags/" + $tag),
+        resolved_commit: $source_commit,
+        method: "github-git-ref"
+      },
       manifest: $manifest[0]
     }' <<<"$release"
 }
@@ -513,12 +665,25 @@ done
 [ -s "$candidates" ] || fail "no eligible $CHANNEL application release found in paginated release set"
 
 if [ "$CHANNEL" = stable ]; then
-  jq -s -e 'sort_by(.version | split(".") | map(tonumber)) | .[-1]' "$candidates"
+  jq -s -e '
+    def selection_key: (.version | split(".") | map(tonumber));
+    sort_by(selection_key) as $ordered |
+    $ordered[-1] as $winner |
+    [$ordered[] | select(selection_key == ($winner | selection_key))] as $ties |
+    if ($ties | length) == 1 then $winner
+    else error("ambiguous stable application release version") end
+  ' "$candidates"
 else
   # Immutable preview releases are retained. Select the highest product
   # prerelease sequence after validation; never use a mutable pointer/latest.
   jq -s -e '
-    sort_by(.version | capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-preview\\.(?<sequence>[0-9]+)\\+") |
-      [.major,.minor,.patch,.sequence] | map(tonumber)) | .[-1]
+    def selection_key:
+      (.version | capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-preview\\.(?<sequence>[0-9]+)\\+") |
+        [.major,.minor,.patch,.sequence] | map(tonumber));
+    sort_by(selection_key) as $ordered |
+    $ordered[-1] as $winner |
+    [$ordered[] | select(selection_key == ($winner | selection_key))] as $ties |
+    if ($ties | length) == 1 then $winner
+    else error("ambiguous preview application release version") end
   ' "$candidates"
 fi
