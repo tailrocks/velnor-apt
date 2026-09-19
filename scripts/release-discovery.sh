@@ -688,13 +688,15 @@ validate_candidate() {
       published_at: .published_at,
       target_commitish: .target_commitish,
       release_assets: $release_assets,
-      source_ref_resolution: {
-        proof_ref: ("refs/tags/" + $tag),
-        resolved_commit: $source_commit,
-        method: "github-git-ref"
-      } + (if $channel == "preview" then {
-        declared_ref_provenance: $preview_branch_provenance
-      } else {} end),
+      source_ref_resolution: (
+        {
+          proof_ref: ("refs/tags/" + $tag),
+          resolved_commit: $source_commit,
+          method: "github-git-ref"
+        } + (if $channel == "preview" then {
+          declared_ref_provenance: $preview_branch_provenance
+        } else {} end)
+      ),
       manifest: $manifest[0]
     }' <<<"$release"
 }

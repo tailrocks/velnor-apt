@@ -203,8 +203,6 @@ before_stable=$(sha256 "$work/package-state.json")
 before_preview=$(sha256 "$work/package-state-preview.json")
 (cd "$work" && "$script" --channel preview > preview.json)
 jq -e --arg version "$pver" --arg commit "$pcommit" '.tag=="preview-"+$commit and .version==$version and .source_ref=="refs/heads/main" and .source_commit==$commit and .source_ref_resolution.proof_ref==("refs/tags/preview-"+$commit) and .source_ref_resolution.declared_ref_provenance.ref=="refs/heads/main" and .source_ref_resolution.declared_ref_provenance.relation=="ancestor" and .source_ref_resolution.declared_ref_provenance.merge_base_commit==$commit' "$work/preview.json" >/dev/null
-(cd "$work" && expect_failure preview-source-not-ancestor env FAKE_PREVIEW_BRANCH_MODE=non-ancestor "$script" --channel preview)
-grep -F 'no eligible preview application release' "$work/preview-source-not-ancestor.stderr" >/dev/null
 [ "$(sha256 "$work/package-state.json")" = "$before_stable" ]
 [ "$(sha256 "$work/package-state-preview.json")" = "$before_preview" ]
 
@@ -213,6 +211,8 @@ expect_failure() {
   local stderr="$work/$name.stderr"
   if "$@" > /dev/null 2> "$stderr"; then echo "expected failure: $name" >&2; exit 1; fi
 }
+(cd "$work" && expect_failure preview-source-not-ancestor env FAKE_PREVIEW_BRANCH_MODE=non-ancestor "$script" --channel preview)
+grep -F 'no eligible preview application release' "$work/preview-source-not-ancestor.stderr" >/dev/null
 jq -s -c . "$work/releases/901" > "$work/pages.json"
 expect_failure no-eligible "$script" --channel stable
 grep -F 'no eligible stable application release' "$work/no-eligible.stderr" >/dev/null
@@ -290,7 +290,7 @@ restore_candidate
 expect_failure source-ref-mismatch env FAKE_REF_MISMATCH=1 "$script" --channel stable
 
 restore_candidate
-jq '.id = 223 | .html_url = "https://github.com/tailrocks/velnor/releases/tag/v1.2.3-duplicate"' \
+jq '.id = 223 | .html_url = "https://github.com/tailrocks/velnor/releases/tag/v1.2.3"' \
   "$work/releases/222" > "$work/releases/duplicate"
 jq -s -c . "$work/releases/222" "$work/releases/duplicate" > "$work/pages.json"
 expect_failure ambiguous-version "$script" --channel stable
@@ -316,6 +316,7 @@ expect_failure package-manifest-crate-version "$script" --channel stable
 restore_candidate
 jq '.html_url = "https://evil.example/release"' "$work/releases/222" > "$work/releases/222.tmp"
 mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
 expect_failure release-url-origin "$script" --channel stable
 
 echo 'release discovery checks passed'
