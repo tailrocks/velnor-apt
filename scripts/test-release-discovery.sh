@@ -21,6 +21,12 @@ case "$*" in
     id=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
     cat "$FAKE_ROOT/manifests/$id"
     ;;
+  *"/git/ref/tags/"*)
+    tag=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
+    commit=$(jq -s -er --arg tag "$tag" 'first(add[] | select(.tag_name == $tag) | .target_commitish)' "$FAKE_ROOT/pages.json")
+    if env | rg -q '^FAKE_REF_MISMATCH=1$'; then commit=ffffffffffffffffffffffffffffffffffffffff; fi
+    jq -cn --arg commit "$commit" '{object:{type:"commit",sha:$commit}}'
+    ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 SH
@@ -31,8 +37,10 @@ sha256() {
   else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
 asset() {
-  jq -cn --argjson id "$1" --arg name "$2" \
-    '{id:$id,name:$name,size:1,state:"uploaded",browser_download_url:("https://example.invalid/" + $name)}'
+  local size=1
+  [ -z "${4:-}" ] || size=$(wc -c < "$4" | tr -d '[:space:]')
+  jq -cn --argjson id "$1" --arg name "$2" --arg tag "$3" --argjson size "$size" \
+    '{id:$id,name:$name,size:$size,state:"uploaded",browser_download_url:("https://github.com/tailrocks/velnor/releases/download/" + $tag + "/" + $name)}'
 }
 components() {
   jq -cn '[{name:"velnor-runner",crate:"velnor-runner",version:"0.1.277",binary:"velnor-runner",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin"]},
@@ -41,9 +49,18 @@ components() {
 }
 make_manifest() {
   local id="$1" version="$2" tag="$3" ref="$4" commit="$5" arm="$6" amd="$7" include_arm="$8" artifacts
-  artifacts=$(jq -cn --arg amd "$amd" --arg arm "$arm" --argjson ok "$include_arm" \
-    '[{name:$amd,target:"x86_64-unknown-linux-gnu",kind:"apt-package",sha256:("aa"*32),size:1}] +
-     (if $ok then [{name:$arm,target:"aarch64-unknown-linux-gnu",kind:"apt-package",sha256:("bb"*32),size:1}] else [] end)')
+  local amd_payload="$work/manifests/payload-$id-amd" arm_payload="$work/manifests/payload-$id-arm"
+  local amd_sha arm_sha amd_size arm_size
+  printf 'fixture-amd64-%s\n' "$id" > "$amd_payload"
+  amd_sha=$(sha256 "$amd_payload")
+  amd_size=$(wc -c < "$amd_payload" | tr -d '[:space:]')
+  printf 'fixture-arm64-%s\n' "$id" > "$arm_payload"
+  arm_sha=$(sha256 "$arm_payload")
+  arm_size=$(wc -c < "$arm_payload" | tr -d '[:space:]')
+  artifacts=$(jq -cn --arg amd "$amd" --arg arm "$arm" --arg amd_sha "$amd_sha" --arg arm_sha "$arm_sha" \
+    --argjson amd_size "$amd_size" --argjson arm_size "$arm_size" --argjson ok "$include_arm" \
+    '[{name:$amd,target:"x86_64-unknown-linux-gnu",kind:"apt-package",sha256:$amd_sha,size:$amd_size}] +
+     (if $ok then [{name:$arm,target:"aarch64-unknown-linux-gnu",kind:"apt-package",sha256:$arm_sha,size:$arm_size}] else [] end)')
   jq -S -n --arg version "$version" --arg tag "$tag" --arg ref "$ref" --arg commit "$commit" \
     --arg release_id "fixture-$tag" --argjson artifacts "$artifacts" --argjson components "$(components)" \
     '{schema:"velnor.product-manifest/v1",product_id:"velnor",
@@ -54,62 +71,76 @@ make_manifest() {
   sha256 "$work/manifests/$id" > "$work/manifests/$((id + 1))"
   local parent
   parent=$(sha256 "$work/manifests/$id")
-  jq -S -n --arg tag "$tag" --arg commit "$commit" --arg version "$version" --arg parent "$parent" \
-    --arg manifest_sha "pending" \
-    '{schema:"velnor.release-record/v1",parent_manifest_sha256:$parent,
-      build:{repository:"tailrocks/velnor",tag:$tag,commit:$commit,crate_version:$version,debian_version:$version,manifest_sha256:$manifest_sha}}' \
-    > "$work/manifests/$((id + 2))"
-  jq -S -n --arg ref "$ref" --arg commit "$commit" --arg version "$version" --arg parent "$parent" \
-    '{schema:"velnor.package-release.v1",parent_manifest_sha256:$parent,source_repository:"tailrocks/velnor",source_ref:$ref,source_commit:$commit,version:$version,assets:[]}' \
-    > "$work/manifests/$((id + 3))"
   jq -S -n --arg commit "$commit" --arg parent "$parent" \
     '{parent_manifest_sha256:$parent,source_sha:$commit,version:1,crate_version:"0.1.277"}' \
     > "$work/manifests/$((id + 4))"
   local manifest_sha
   manifest_sha=$(sha256 "$work/manifests/$((id + 4))")
-  jq --arg manifest_sha "$manifest_sha" '.build.manifest_sha256 = $manifest_sha' \
-    "$work/manifests/$((id + 2))" > "$work/manifests/$((id + 2)).tmp"
-  mv "$work/manifests/$((id + 2)).tmp" "$work/manifests/$((id + 2))"
+  jq -S -n --arg tag "$tag" --arg commit "$commit" --arg version "$version" --arg parent "$parent" \
+    --arg manifest_sha "$manifest_sha" --arg amd_sha "$amd_sha" --arg arm_sha "$arm_sha" \
+    --argjson ok "$include_arm" \
+    '{schema:"velnor.release-record/v1",parent_manifest_sha256:$parent,
+      build:{repository:"tailrocks/velnor",tag:$tag,commit:$commit,crate_version:$version,debian_version:$version,manifest_version:1,manifest_sha256:$manifest_sha},
+      architectures:([
+        {arch:"amd64",target:"x86_64-unknown-linux-gnu",binary_sha256:("cc"*32),deb_sha256:$amd_sha,oci_platform_digest:("sha256:" + ("aa"*32))}
+      ] + (if $ok then [
+        {arch:"arm64",target:"aarch64-unknown-linux-gnu",binary_sha256:("dd"*32),deb_sha256:$arm_sha,oci_platform_digest:("sha256:" + ("bb"*32))}
+      ] else [] end)),
+      oci_index_digest:("sha256:" + ("ee"*32)),
+      oci_image_ref:("ghcr.io/tailrocks/velnor/app@sha256:" + ("ee"*32)),
+      oci_labels:{version:$version,revision:$commit,source:"https://github.com/tailrocks/velnor",manifest_sha256:$manifest_sha},
+      apt:{origin:"Velnor",suite:(if ($version|test("-preview[.]")) then "preview" else "stable" end),component:"main"}}' \
+    > "$work/manifests/$((id + 2))"
+  jq -S -n --arg ref "$ref" --arg commit "$commit" --arg version "$version" --arg parent "$parent" \
+    --argjson artifacts "$artifacts" \
+    '{schema:"velnor.package-release.v1",parent_manifest_sha256:$parent,source_repository:"tailrocks/velnor",source_ref:$ref,source_commit:$commit,version:$version,assets:[$artifacts[] | {name,sha256}]}' \
+    > "$work/manifests/$((id + 3))"
   sha256 "$work/manifests/$((id + 2))" > "$work/manifests/$((id + 2)).sha256"
   sha256 "$work/manifests/$((id + 4))" > "$work/manifests/$((id + 4)).sha256"
 }
 make_release() {
   local id="$1" tag="$2" prerelease="$3" commit="$4" amd="$5" arm="$6" include_arm="$7"
-  local next=$((id * 100 + 1)) assets='[]' name obj
+  local next=$((id * 100 + 1)) assets='[]' name obj body
   local amd_sha arm_sha
-  amd_sha=$(printf 'aa%.0s' {1..32})
-  arm_sha=$(printf 'bb%.0s' {1..32})
+  amd_sha=$(sha256 "$work/manifests/payload-$id-amd")
+  arm_sha=$(sha256 "$work/manifests/payload-$id-arm")
   for name in product-manifest.json product-manifest.json.sha256 release-manifest.json SHA256SUMS release-record.json release-record.json.sha256 manifest.json manifest.json.sha256; do
+    body=''
     case "$name" in
-      product-manifest.json) obj=$(asset "$id" "$name") ;;
-      product-manifest.json.sha256) obj=$(asset "$((id + 1))" "$name") ;;
-      release-record.json) obj=$(asset "$((id + 2))" "$name") ;;
-      release-manifest.json) obj=$(asset "$((id + 3))" "$name") ;;
-      manifest.json) obj=$(asset "$((id + 4))" "$name") ;;
-      release-record.json.sha256) cp "$work/manifests/$((id + 2)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name"); next=$((next + 1)) ;;
-      manifest.json.sha256) cp "$work/manifests/$((id + 4)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name"); next=$((next + 1)) ;;
-      *) obj=$(asset "$next" "$name"); next=$((next + 1)) ;;
+      product-manifest.json) body="$work/manifests/$id"; obj=$(asset "$id" "$name" "$tag" "$body") ;;
+      product-manifest.json.sha256) body="$work/manifests/$((id + 1))"; obj=$(asset "$((id + 1))" "$name" "$tag" "$body") ;;
+      release-record.json) body="$work/manifests/$((id + 2))"; obj=$(asset "$((id + 2))" "$name" "$tag" "$body") ;;
+      release-manifest.json) body="$work/manifests/$((id + 3))"; obj=$(asset "$((id + 3))" "$name" "$tag" "$body") ;;
+      SHA256SUMS) printf '%s  %s\n%s  %s\n' "$amd_sha" "$amd" "$arm_sha" "$arm" > "$work/manifests/$next"; body="$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
+      manifest.json) body="$work/manifests/$((id + 4))"; obj=$(asset "$((id + 4))" "$name" "$tag" "$body") ;;
+      release-record.json.sha256) cp "$work/manifests/$((id + 2)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
+      manifest.json.sha256) cp "$work/manifests/$((id + 4)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
+      *) obj=$(asset "$next" "$name" "$tag"); next=$((next + 1)) ;;
     esac
     assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
   done
   for name in "$amd" "$amd.sha256"; do
+    body=''
     case "$name" in
-      "$amd.sha256") printf '%s\n' "$amd_sha" > "$work/manifests/$next" ;;
+      "$amd") cp "$work/manifests/payload-$id-amd" "$work/manifests/$next"; body="$work/manifests/$next" ;;
+      "$amd.sha256") printf '%s\n' "$amd_sha" > "$work/manifests/$next"; body="$work/manifests/$next" ;;
     esac
-    obj=$(asset "$next" "$name"); next=$((next + 1))
+    obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1))
     assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
   done
   if [ "$include_arm" = true ]; then
     for name in "$arm" "$arm.sha256"; do
+      body=''
       case "$name" in
-        "$arm.sha256") printf '%s\n' "$arm_sha" > "$work/manifests/$next" ;;
+        "$arm") cp "$work/manifests/payload-$id-arm" "$work/manifests/$next"; body="$work/manifests/$next" ;;
+        "$arm.sha256") printf '%s\n' "$arm_sha" > "$work/manifests/$next"; body="$work/manifests/$next" ;;
       esac
-      obj=$(asset "$next" "$name"); next=$((next + 1))
+      obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1))
       assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
     done
   fi
   jq -S -n --argjson id "$id" --arg tag "$tag" --argjson prerelease "$prerelease" --arg commit "$commit" --argjson assets "$assets" \
-    '{id:$id,tag_name:$tag,draft:false,prerelease:$prerelease,target_commitish:$commit,html_url:("https://example.invalid/" + $tag),published_at:"2026-09-19T00:00:00Z",assets:$assets}' \
+    '{id:$id,tag_name:$tag,draft:false,prerelease:$prerelease,target_commitish:$commit,html_url:("https://github.com/tailrocks/velnor/releases/tag/" + $tag),published_at:"2026-09-19T00:00:00Z",assets:$assets}' \
     > "$work/releases/$id"
 }
 
@@ -180,4 +211,77 @@ jq -S -n '{id:778,tag_name:"preview",draft:false,prerelease:true,target_commitis
 jq -s -c . "$work/releases/778" > "$work/pages.json"
 expect_failure rolling-preview "$script" --channel preview
 grep -F 'no eligible preview application release' "$work/rolling-preview.stderr" >/dev/null
+
+# Hostile mutations stay internally byte-addressed where practical. Each
+# mutation must make the typed application candidate ineligible.
+for path in 222 223 224 225 22201 22202; do cp "$work/manifests/$path" "$work/baseline-$path"; done
+cp "$work/releases/222" "$work/baseline-release-222"
+restore_candidate() {
+  for path in 222 223 224 225 22201 22202; do cp "$work/baseline-$path" "$work/manifests/$path"; done
+  cp "$work/baseline-release-222" "$work/releases/222"
+  jq -s -c . "$work/releases/222" > "$work/pages.json"
+}
+
+restore_candidate
+jq '.components[] |= if .name == "velnorctl" then .binary = "evilctl" else . end' \
+  "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure binary-name-drift "$script" --channel stable
+
+restore_candidate
+printf 'tampered\n' > "$work/manifests/22201"
+expect_failure sha256-sums-tamper "$script" --channel stable
+
+restore_candidate
+jq '.assets = [{name:"wrong.deb",sha256:("e" * 64)}]' \
+  "$work/manifests/225" > "$work/manifests/225.tmp"
+mv "$work/manifests/225.tmp" "$work/manifests/225"
+expect_failure release-manifest-assets-tamper "$script" --channel stable
+
+restore_candidate
+jq '.architectures = []' "$work/manifests/224" > "$work/manifests/224.tmp"
+mv "$work/manifests/224.tmp" "$work/manifests/224"
+sha256 "$work/manifests/224" > "$work/manifests/22202"
+expect_failure release-record-census "$script" --channel stable
+
+restore_candidate
+printf 'homebrew-good\n' > "$work/manifests/homebrew-good"
+homebrew_sha=$(sha256 "$work/manifests/homebrew-good")
+homebrew_size=$(wc -c < "$work/manifests/homebrew-good" | tr -d '[:space:]')
+jq --arg name "velnorctl-1.2.3-aarch64-apple-darwin.tar.gz" --arg sha "$homebrew_sha" \
+  --argjson size "$homebrew_size" '.artifacts += [{name:$name,target:"aarch64-apple-darwin",kind:"homebrew-archive",sha256:$sha,size:$size}]' \
+  "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+printf 'tampered-homebrew\n' > "$work/manifests/2299"
+jq --arg name "velnorctl-1.2.3-aarch64-apple-darwin.tar.gz" \
+  '.assets += [{id:2299,name:$name,size:17,state:"uploaded",browser_download_url:("https://github.com/tailrocks/velnor/releases/download/v1.2.3/" + $name)}]' \
+  "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure homebrew-digest-tamper "$script" --channel stable
+
+restore_candidate
+jq '(.assets[] | select(.name == "product-manifest.json")).browser_download_url = ""' \
+  "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure asset-url-missing "$script" --channel stable
+
+restore_candidate
+expect_failure source-ref-mismatch env FAKE_REF_MISMATCH=1 "$script" --channel stable
+
+restore_candidate
+jq '.id = 223 | .html_url = "https://github.com/tailrocks/velnor/releases/tag/v1.2.3-duplicate"' \
+  "$work/releases/222" > "$work/releases/duplicate"
+jq -s -c . "$work/releases/222" "$work/releases/duplicate" > "$work/pages.json"
+expect_failure ambiguous-version "$script" --channel stable
+
+restore_candidate
+jq '.release_id = "bad release id"' "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure release-id-grammar "$script" --channel stable
+
 echo 'release discovery checks passed'
