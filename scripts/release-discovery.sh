@@ -193,6 +193,34 @@ resolve_immutable_release_ref() {
   esac
 }
 
+resolve_preview_branch_ancestry() {
+  # A preview's immutable tag proves the build commit, but not the producer's
+  # declared main-branch source. Compare the historical commit against the
+  # current main tip and require the preview commit to be an ancestor. This
+  # deliberately accepts a main tip that advanced after issuance; equality
+  # with today's main is neither required nor meaningful provenance.
+  local commit="$1" compare_json
+  compare_json="$(gh api \
+    --header 'Accept: application/vnd.github+json' \
+    "repos/$SOURCE_REPOSITORY/compare/main...$commit")" || return 1
+  jq -e --arg commit "$commit" '
+    ((.status == "behind") or (.status == "identical")) and
+    (.merge_base_commit.sha == $commit) and
+    (.base_commit.sha | type == "string" and test("^[0-9a-f]{40}$"))
+  ' <<<"$compare_json" >/dev/null || return 1
+  jq -c --arg commit "$commit" '
+    {
+      ref: "refs/heads/main",
+      relation: (if .status == "identical" then "tip" else "ancestor" end),
+      status: .status,
+      merge_base_commit: .merge_base_commit.sha,
+      base_commit: .base_commit.sha,
+      head_commit: $commit,
+      method: "github-compare-ancestry"
+    }
+  ' <<<"$compare_json"
+}
+
 release_asset_id() {
   local release="$1" name="$2"
   jq -er --arg name "$name" \
@@ -359,6 +387,7 @@ parent_manifest_digest() {
 validate_subordinate_records() {
   local release="$1" tag="$2" source_ref="$3" source_commit="$4" version="$5" manifest_sha="$6" product_manifest_file="$7"
   local release_manifest_id record_file release_manifest_file package_file package_sha expected_assets actual_assets
+  local record_manifest_version expected_crate_version
 
   release_manifest_id="$(release_asset_id "$release" release-manifest.json)" || return 1
   release_manifest_file="$tmp_dir/release-manifest-$release_manifest_id.json"
@@ -377,6 +406,15 @@ validate_subordinate_records() {
   ' "$product_manifest_file")" || return 1
   actual_assets="$(jq -S '.assets' "$release_manifest_file")" || return 1
   [ "$actual_assets" = "$expected_assets" ] || return 1
+
+  record_manifest_version="$(jq -er \
+    '.build.manifest_version | select(type == "number" and floor == . and . > 0)' \
+    "$record_file")" || return 1
+  expected_crate_version="$(jq -er --arg package "$PACKAGE" '
+    [.components[] | select(.name == $package) | .version] |
+    if length == 1 and (.[0] | type == "string" and length > 0) then .[0]
+    else error("package component version must be unique") end
+  ' "$product_manifest_file")" || return 1
 
   jq -e \
     --arg schema "$RELEASE_RECORD_SCHEMA" --arg repository "$SOURCE_REPOSITORY" \
@@ -437,7 +475,13 @@ validate_subordinate_records() {
     "$release_manifest_file" >/dev/null || return 1
   jq -e \
     --arg manifest_sha "$manifest_sha" --arg source_commit "$source_commit" \
-    '(.parent_manifest_sha256 == $manifest_sha) and (.source_sha == $source_commit)' \
+    --arg expected_crate_version "$expected_crate_version" \
+    --argjson record_manifest_version "$record_manifest_version" \
+    '((keys | sort) == ["crate_version","parent_manifest_sha256","source_sha","version"]) and
+     (.parent_manifest_sha256 == $manifest_sha) and
+     (.source_sha == $source_commit) and
+     (.crate_version == $expected_crate_version) and
+     (.version | type == "number" and floor == . and . > 0 and . == $record_manifest_version)' \
     "$package_file" >/dev/null || return 1
 }
 
@@ -538,10 +582,12 @@ validate_product_manifest() {
 validate_candidate() {
   local release="$1"
   local tag version source_ref source_commit manifest_id manifest_file manifest_sha preview_tag_commit
-  local resolved_source_commit
+  local resolved_source_commit expected_release_url preview_branch_provenance='null'
   local prerelease draft
 
   release_assets_are_well_formed "$release" || return 1
+  tag="$(jq -er '.tag_name | strings' <<<"$release")" || return 1
+  expected_release_url="https://github.com/$SOURCE_REPOSITORY/releases/tag/$tag"
   jq -e '
     (.id | type == "number" and . > 0 and floor == .) and
     (.html_url | type == "string" and length > 0) and
@@ -552,7 +598,8 @@ validate_candidate() {
   prerelease="$(jq -er '.prerelease | tostring' <<<"$release")" || return 1
   [ "$draft" = false ] || return 1
 
-  tag="$(jq -er '.tag_name | strings' <<<"$release")" || return 1
+  jq -e --arg expected_url "$expected_release_url" \
+    '.html_url == $expected_url' <<<"$release" >/dev/null || return 1
   if [ "$CHANNEL" = stable ]; then
     [ "$prerelease" = false ] || return 1
     [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
@@ -575,6 +622,9 @@ validate_candidate() {
   release_asset_urls_are_canonical "$release" "$tag" || return 1
   resolved_source_commit="$(resolve_immutable_release_ref "$tag")" || return 1
   [ "$resolved_source_commit" = "$source_commit" ] || return 1
+  if [ "$CHANNEL" = preview ]; then
+    preview_branch_provenance="$(resolve_preview_branch_ancestry "$source_commit")" || return 1
+  fi
 
   manifest_id="$(release_asset_id "$release" "$PRODUCT_MANIFEST_ASSET")" || return 1
   manifest_file="$tmp_dir/product-manifest-$manifest_id.json"
@@ -613,6 +663,8 @@ validate_candidate() {
     --arg source_commit "$source_commit" \
     --arg manifest_schema "$PRODUCT_MANIFEST_SCHEMA" \
     --arg manifest_sha256 "$manifest_sha" \
+    --arg release_url "$expected_release_url" \
+    --argjson preview_branch_provenance "$preview_branch_provenance" \
     --slurpfile manifest "$manifest_file" \
     '(
       [.assets[] | {id,name,size,state,browser_download_url}] | sort_by(.name)
@@ -632,7 +684,7 @@ validate_candidate() {
       manifest_sha256: $manifest_sha256,
       release_id: $manifest[0].release_id,
       provider_release_id: .id,
-      release_url: .html_url,
+      release_url: $release_url,
       published_at: .published_at,
       target_commitish: .target_commitish,
       release_assets: $release_assets,
@@ -640,7 +692,9 @@ validate_candidate() {
         proof_ref: ("refs/tags/" + $tag),
         resolved_commit: $source_commit,
         method: "github-git-ref"
-      },
+      } + (if $channel == "preview" then {
+        declared_ref_provenance: $preview_branch_provenance
+      } else {} end),
       manifest: $manifest[0]
     }' <<<"$release"
 }
