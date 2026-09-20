@@ -279,6 +279,25 @@ jq -e '
 
 "$script" --channel stable > "$work/stable.json"
 jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="222" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest.components | length == 3) and (.manifest.components | all(.targets | length == 4)) and (.manifest.artifacts | length == 18) and ((.manifest.artifacts | map(.kind) | sort | group_by(.) | map({kind:.[0],count:length})) == [{kind:"apt-package",count:2},{kind:"archive",count:2},{kind:"binary",count:12},{kind:"homebrew-archive",count:2}]) and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
+jq -e '
+  (keys | sort) == [
+    "channel","manifest","manifest_asset","manifest_schema",
+    "manifest_sha256","package","product_id","provider_release_id",
+    "provider_repository_id","published_at","release_assets","release_id",
+    "release_tag","release_url","source_commit","source_ref",
+    "source_ref_resolution","source_repository","tag","target_commitish",
+    "version"
+  ] and
+  .manifest_asset == "product-manifest.json" and
+  .manifest_schema == "velnor.product-manifest/v1" and
+  .manifest.release_id == .release_id and
+  .manifest.version == .version and
+  .manifest.source_repository == .source_repository and
+  .manifest.source_ref == .source_ref and
+  .manifest.source_commit == .source_commit and
+  .manifest.release_tag == .release_tag and
+  any(.release_assets[]; .name == "release-attestation.json")
+' "$work/stable.json" >/dev/null
 "$script" --channel stable --version v1.2.2 > "$work/explicit.json"
 jq -e --arg commit "$c122" '.tag=="v1.2.2" and .source_commit==$commit' "$work/explicit.json" >/dev/null
 
