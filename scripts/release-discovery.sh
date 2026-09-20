@@ -224,9 +224,16 @@ resolve_immutable_release_ref() {
   # the immutable release tag through GitHub's ref API and compare its commit
   # with the release and canonical manifest before accepting the candidate.
   local tag="$1" ref_json object_type object_sha tag_json
-  ref_json="$(gh api \
+  local tag_key="${tag//\//_}"
+  local ref_file="$tmp_dir/git-ref-tags-$tag_key.json"
+  local tag_file="$tmp_dir/git-tag-object-$tag_key.json"
+  # Transport failure is not candidate ineligibility.
+  gh api \
     --header 'Accept: application/vnd.github+json' \
-    "repos/$SOURCE_REPOSITORY/git/ref/tags/$tag")" || return 1
+    "repos/$SOURCE_REPOSITORY/git/ref/tags/$tag" \
+    > "$ref_file" \
+    || fail "GitHub API failed while resolving tag ref $tag"
+  ref_json="$(cat "$ref_file")"
   object_type="$(jq -er '.object.type | strings' <<<"$ref_json")" || return 1
   object_sha="$(jq -er '.object.sha | strings' <<<"$ref_json")" || return 1
   case "$object_type" in
@@ -235,9 +242,12 @@ resolve_immutable_release_ref() {
       printf '%s\n' "$object_sha"
       ;;
     tag)
-      tag_json="$(gh api \
+      gh api \
         --header 'Accept: application/vnd.github+json' \
-        "repos/$SOURCE_REPOSITORY/git/tags/$object_sha")" || return 1
+        "repos/$SOURCE_REPOSITORY/git/tags/$object_sha" \
+        > "$tag_file" \
+        || fail "GitHub API failed while resolving annotated tag $tag"
+      tag_json="$(cat "$tag_file")"
       [ "$(jq -er '.object.type | strings' <<<"$tag_json")" = commit ] || return 1
       object_sha="$(jq -er '.object.sha | strings' <<<"$tag_json")" || return 1
       valid_source_commit "$object_sha" || return 1
@@ -256,9 +266,13 @@ resolve_preview_branch_ancestry() {
   # deliberately accepts a main tip that advanced after issuance; equality
   # with today's main is neither required nor meaningful provenance.
   local commit="$1" compare_json
-  compare_json="$(gh api \
+  local compare_file="$tmp_dir/compare-main-$commit.json"
+  gh api \
     --header 'Accept: application/vnd.github+json' \
-    "repos/$SOURCE_REPOSITORY/compare/main...$commit")" || return 1
+    "repos/$SOURCE_REPOSITORY/compare/main...$commit" \
+    > "$compare_file" \
+    || fail "GitHub API failed while comparing main...$commit"
+  compare_json="$(cat "$compare_file")"
   jq -e --arg commit "$commit" '
     ((.status == "behind") or (.status == "identical")) and
     (.merge_base_commit.sha == $commit) and
@@ -756,10 +770,12 @@ validate_candidate() {
     [ "$source_commit" = "$preview_tag_commit" ] || return 1
   fi
   release_asset_urls_are_canonical "$release" "$tag" || return 1
-  resolved_source_commit="$(resolve_immutable_release_ref "$tag")" || return 1
+  resolve_immutable_release_ref "$tag" > "$tmp_dir/resolved-source-commit" || return 1
+  resolved_source_commit="$(cat "$tmp_dir/resolved-source-commit")"
   [ "$resolved_source_commit" = "$source_commit" ] || return 1
   if [ "$CHANNEL" = preview ]; then
-    preview_branch_provenance="$(resolve_preview_branch_ancestry "$source_commit")" || return 1
+    resolve_preview_branch_ancestry "$source_commit" > "$tmp_dir/preview-provenance.json" || return 1
+    preview_branch_provenance="$(cat "$tmp_dir/preview-provenance.json")"
   fi
 
   manifest_id="$(release_asset_id "$release" "$PRODUCT_MANIFEST_ASSET")" || return 1
