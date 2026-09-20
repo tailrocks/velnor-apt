@@ -17,7 +17,10 @@ automatic = "both"
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 default_branch = "main"
-pull_request_on_velnor = true
+# PRs cannot wait on velnor-target-mvp: no self-hosted runner is registered
+# for this repository, so the Velnor docs job queues until the 24h cancel and
+# ci-required never succeeds (see #241). Keep both lanes for main/nightly.
+pull_request_on_velnor = false
 files = ["ci-pr.yml", "ci-policy.yml", "ci-main.yml", "nightly.yml", "maintenance.yml", "release.yml", "renovate.yml", "renovate-validate.yml"]
 
 [policy]
