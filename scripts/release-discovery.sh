@@ -832,6 +832,51 @@ validate_candidate() {
     }' <<<"$release"
 }
 
+# Keep the producer-owned discovery result byte shape aligned with the typed
+# schema-2 `DiscoverySelection` consumer. The central runtime revalidates this
+# document before fetching; this source-side gate prevents a future helper
+# change from silently dropping the immutable release/manifest/attestation
+# binding that handoff relies on.
+validate_selection_contract() {
+  local selection="$1"
+  jq -e '
+    (keys | sort) == [
+      "channel","manifest","manifest_asset","manifest_schema",
+      "manifest_sha256","package","product_id","provider_release_id",
+      "provider_repository_id","published_at","release_assets","release_id",
+      "release_tag","release_url","source_commit","source_ref",
+      "source_ref_resolution","source_repository","tag","target_commitish",
+      "version"
+    ] and
+    (.channel == "stable" or .channel == "preview") and
+    .product_id == "velnor" and
+    .manifest_asset == "product-manifest.json" and
+    .manifest_schema == "velnor.product-manifest/v1" and
+    (.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    (.release_id | type == "string" and test("^[1-9][0-9]*$")) and
+    (.provider_release_id | type == "number" and . > 0 and floor == .) and
+    (.provider_repository_id | type == "number" and . > 0 and floor == .) and
+    (.release_assets | type == "array" and length > 0 and
+      all(.[];
+        (keys | sort) == ["browser_download_url","id","name","size","state"] and
+        (.id | type == "number" and . > 0 and floor == .) and
+        (.name | type == "string") and
+        (.size | type == "number" and . > 0 and floor == .) and
+        .state == "uploaded" and
+        (.browser_download_url | type == "string")) and
+      any(.[]; .name == "release-attestation.json")) and
+    (.source_ref_resolution | type == "object") and
+    (.manifest | type == "object" and
+      .schema == "velnor.product-manifest/v1" and
+      .release_id == $selection.release_id and
+      .version == $selection.version and
+      .source_repository == $selection.source_repository and
+      .source_ref == $selection.source_ref and
+      .source_commit == $selection.source_commit and
+      .release_tag == $selection.release_tag)
+  ' --argjson selection "$selection" <<<"$selection" >/dev/null
+}
+
 release_pages="$(fetch_releases)" \
   || fail "GitHub API failed while listing releases"
 releases="$(jq -s -e '
@@ -845,7 +890,9 @@ release_count="$(jq 'length' <<<"$releases")"
 for ((index = 0; index < release_count; index += 1)); do
   release="$(jq -c ".[$index]" <<<"$releases")"
   if candidate="$(validate_candidate "$release")"; then
-    printf '%s\n' "$candidate" >> "$candidates"
+    if validate_selection_contract "$candidate"; then
+      printf '%s\n' "$candidate" >> "$candidates"
+    fi
   fi
 done
 
