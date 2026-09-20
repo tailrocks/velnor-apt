@@ -65,24 +65,62 @@ asset() {
     '{id:$id,name:$name,size:$size,state:"uploaded",browser_download_url:("https://github.com/tailrocks/velnor/releases/download/" + $tag + "/" + $name)}'
 }
 components() {
-  jq -cn '[{name:"velnor-runner",crate:"velnor-runner",version:"0.1.277",binary:"velnor-runner",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin"]},
-    {name:"velnorctl",crate:"velnorctl",version:"0.1.0",binary:"velnorctl",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin"]},
-    {name:"velnor-workflow",crate:"velnor-workflow",version:"0.1.0",binary:"velnor-workflow",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin"]}]'
+  jq -cn '[
+    {name:"velnor-runner",crate:"velnor-runner",version:"0.1.277",binary:"velnor-runner",feature:"release-build",identity:"version",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-apple-darwin"]},
+    {name:"velnor-workflow",crate:"velnor-workflow",version:"0.1.0",binary:"velnor-workflow",feature:null,identity:"revision",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-apple-darwin"]},
+    {name:"velnorctl",crate:"velnorctl",version:"0.1.0",binary:"velnorctl",feature:"release-build",identity:"version",targets:["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-apple-darwin"]}]'
 }
 make_manifest() {
-  local id="$1" version="$2" tag="$3" ref="$4" commit="$5" arm="$6" amd="$7" include_arm="$8" artifacts
-  local amd_payload="$work/manifests/payload-$id-amd" arm_payload="$work/manifests/payload-$id-arm"
+  local id="$1" version="$2" tag="$3" ref="$4" commit="$5" arm="$6" amd="$7" include_arm="$8" artifacts='[]'
+  local target component asset_name payload digest size archive_kind archive_name archive_path archive_dir
+  local amd_payload="$work/manifests/payload-$id-$amd" arm_payload="$work/manifests/payload-$id-$arm"
   local amd_sha arm_sha amd_size arm_size
+
+  # Disposable producer-shaped generation. The native producer's canonical
+  # assembly emits this four-target/18-row inventory; these bytes exercise the
+  # consumer census without claiming provider or signing authority.
+  for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+    while IFS=$'\t' read -r component; do
+      asset_name="$component-$target"
+      payload="$work/manifests/payload-$id-$asset_name"
+      printf 'native-a8-fixture-%s-%s-%s\n' "$id" "$component" "$target" > "$payload"
+      digest=$(sha256 "$payload")
+      size=$(wc -c < "$payload" | tr -d '[:space:]')
+      artifacts=$(jq -c --arg name "$asset_name" --arg target "$target" --arg digest "$digest" --argjson size "$size" \
+        '. + [{name:$name,target:$target,kind:"binary",sha256:$digest,size:$size}]' <<<"$artifacts")
+    done < <(components | jq -r '.[] | [.name] | @tsv')
+
+    archive_name="velnorctl-$version-$target.tar.gz"
+    archive_path="$work/manifests/payload-$id-$archive_name"
+    archive_dir="$work/manifests/archive-$id-$target"
+    mkdir -p "$archive_dir"
+    printf 'archive-identity-%s-%s\n' "$id" "$target" > "$archive_dir/identity.json"
+    printf 'archive-manifest-%s-%s\n' "$version" "$target" > "$archive_dir/manifest.json"
+    while IFS=$'\t' read -r component; do
+      printf 'archive-component-%s-%s-%s\n' "$id" "$component" "$target" > "$archive_dir/$component"
+    done < <(components | jq -r '.[] | [.name] | @tsv')
+    tar -czf "$archive_path" -C "$archive_dir" identity.json manifest.json velnor-runner velnor-workflow velnorctl
+    rm -rf -- "$archive_dir"
+    digest=$(sha256 "$archive_path")
+    size=$(wc -c < "$archive_path" | tr -d '[:space:]')
+    archive_kind=archive
+    case "$target" in *-apple-darwin) archive_kind=homebrew-archive ;; esac
+    artifacts=$(jq -c --arg name "$archive_name" --arg target "$target" --arg kind "$archive_kind" --arg digest "$digest" --argjson size "$size" \
+      '. + [{name:$name,target:$target,kind:$kind,sha256:$digest,size:$size}]' <<<"$artifacts")
+  done
+
   printf 'fixture-amd64-%s\n' "$id" > "$amd_payload"
   amd_sha=$(sha256 "$amd_payload")
   amd_size=$(wc -c < "$amd_payload" | tr -d '[:space:]')
   printf 'fixture-arm64-%s\n' "$id" > "$arm_payload"
   arm_sha=$(sha256 "$arm_payload")
   arm_size=$(wc -c < "$arm_payload" | tr -d '[:space:]')
-  artifacts=$(jq -cn --arg amd "$amd" --arg arm "$arm" --arg amd_sha "$amd_sha" --arg arm_sha "$arm_sha" \
-    --argjson amd_size "$amd_size" --argjson arm_size "$arm_size" --argjson ok "$include_arm" \
-    '[{name:$amd,target:"x86_64-unknown-linux-gnu",kind:"apt-package",sha256:$amd_sha,size:$amd_size}] +
-     (if $ok then [{name:$arm,target:"aarch64-unknown-linux-gnu",kind:"apt-package",sha256:$arm_sha,size:$arm_size}] else [] end)')
+  artifacts=$(jq -c --arg name "$amd" --arg target "x86_64-unknown-linux-gnu" --arg digest "$amd_sha" --argjson size "$amd_size" \
+    '. + [{name:$name,target:$target,kind:"apt-package",sha256:$digest,size:$size}]' <<<"$artifacts")
+  if [ "$include_arm" = true ]; then
+    artifacts=$(jq -c --arg name "$arm" --arg target "aarch64-unknown-linux-gnu" --arg digest "$arm_sha" --argjson size "$arm_size" \
+      '. + [{name:$name,target:$target,kind:"apt-package",sha256:$digest,size:$size}]' <<<"$artifacts")
+  fi
   jq -S -n --arg version "$version" --arg tag "$tag" --arg ref "$ref" --arg commit "$commit" \
     --arg release_id "$id" --argjson artifacts "$artifacts" --argjson components "$(components)" \
     '{schema:"velnor.product-manifest/v1",product_id:"velnor",
@@ -115,7 +153,7 @@ make_manifest() {
     > "$work/manifests/$((id + 2))"
   jq -S -n --arg ref "$ref" --arg commit "$commit" --arg version "$version" --arg parent "$parent" \
     --argjson artifacts "$artifacts" \
-    '{schema:"velnor.package-release.v1",parent_manifest_sha256:$parent,source_repository:"tailrocks/velnor",source_ref:$ref,source_commit:$commit,version:$version,assets:[$artifacts[] | {name,sha256}]}' \
+    '{schema:"velnor.package-release.v1",parent_manifest_sha256:$parent,source_repository:"tailrocks/velnor",source_ref:$ref,source_commit:$commit,version:$version,assets:[$artifacts[] | select(.kind == "apt-package") | {name,sha256}]}' \
     > "$work/manifests/$((id + 3))"
   sha256 "$work/manifests/$((id + 2))" > "$work/manifests/$((id + 2)).sha256"
   sha256 "$work/manifests/$((id + 4))" > "$work/manifests/$((id + 4)).sha256"
@@ -123,9 +161,9 @@ make_manifest() {
 make_release() {
   local id="$1" tag="$2" prerelease="$3" commit="$4" amd="$5" arm="$6" include_arm="$7"
   local next=$((id * 100 + 1)) assets='[]' name obj body attestation_file manifest_sha
-  local amd_sha arm_sha
-  amd_sha=$(sha256 "$work/manifests/payload-$id-amd")
-  arm_sha=$(sha256 "$work/manifests/payload-$id-arm")
+  local amd_sha arm_sha artifact_name artifact_kind payload sidecar
+  amd_sha=$(sha256 "$work/manifests/payload-$id-$amd")
+  arm_sha=$(sha256 "$work/manifests/payload-$id-$arm")
   manifest_sha=$(sha256 "$work/manifests/$id")
   attestation_file="$work/manifests/attestation-$id"
   jq -S -n --arg source_ref "$(jq -er '.source_ref' "$work/manifests/$id")" \
@@ -144,8 +182,16 @@ make_release() {
       product-manifest.json.sha256) body="$work/manifests/$((id + 1))"; obj=$(asset "$((id + 1))" "$name" "$tag" "$body") ;;
       release-record.json) body="$work/manifests/$((id + 2))"; obj=$(asset "$((id + 2))" "$name" "$tag" "$body") ;;
       release-manifest.json) body="$work/manifests/$((id + 3))"; obj=$(asset "$((id + 3))" "$name" "$tag" "$body") ;;
-      release-attestation.json) body="$attestation_file"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
-      SHA256SUMS) printf '%s  %s\n%s  %s\n' "$amd_sha" "$amd" "$arm_sha" "$arm" > "$work/manifests/$next"; body="$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
+      release-attestation.json)
+        cp -- "$attestation_file" "$work/manifests/$next"
+        obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
+      SHA256SUMS)
+        if [ "$include_arm" = true ]; then
+          printf '%s  %s\n%s  %s\n' "$amd_sha" "$amd" "$arm_sha" "$arm" > "$work/manifests/$next"
+        else
+          printf '%s  %s\n' "$amd_sha" "$amd" > "$work/manifests/$next"
+        fi
+        body="$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
       manifest.json) body="$work/manifests/$((id + 4))"; obj=$(asset "$((id + 4))" "$name" "$tag" "$body") ;;
       release-record.json.sha256) cp "$work/manifests/$((id + 2)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
       manifest.json.sha256) cp "$work/manifests/$((id + 4)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
@@ -153,26 +199,19 @@ make_release() {
     esac
     assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
   done
-  for name in "$amd" "$amd.sha256"; do
-    body=''
-    case "$name" in
-      "$amd") cp "$work/manifests/payload-$id-amd" "$work/manifests/$next"; body="$work/manifests/$next" ;;
-      "$amd.sha256") printf '%s\n' "$amd_sha" > "$work/manifests/$next"; body="$work/manifests/$next" ;;
-    esac
-    obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1))
+  while IFS=$'\t' read -r artifact_name artifact_kind; do
+    payload="$work/manifests/payload-$id-$artifact_name"
+    cp -- "$payload" "$work/manifests/$next"
+    obj=$(asset "$next" "$artifact_name" "$tag" "$work/manifests/$next"); next=$((next + 1))
     assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
-  done
-  if [ "$include_arm" = true ]; then
-    for name in "$arm" "$arm.sha256"; do
-      body=''
-      case "$name" in
-        "$arm") cp "$work/manifests/payload-$id-arm" "$work/manifests/$next"; body="$work/manifests/$next" ;;
-        "$arm.sha256") printf '%s\n' "$arm_sha" > "$work/manifests/$next"; body="$work/manifests/$next" ;;
-      esac
-      obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1))
+    if [ "$artifact_kind" = apt-package ]; then
+      sidecar="$work/manifests/payload-$id-$artifact_name.sha256"
+      printf '%s\n' "$(sha256 "$payload")" > "$sidecar"
+      cp -- "$sidecar" "$work/manifests/$next"
+      obj=$(asset "$next" "$artifact_name.sha256" "$tag" "$work/manifests/$next"); next=$((next + 1))
       assets=$(jq -c --argjson obj "$obj" '. + [$obj]' <<< "$assets")
-    done
-  fi
+    fi
+  done < <(jq -r '.artifacts[] | [.name,.kind] | @tsv' "$work/manifests/$id")
   jq -S -n --argjson id "$id" --arg tag "$tag" --argjson prerelease "$prerelease" --arg commit "$commit" --argjson assets "$assets" \
     '{id:$id,tag_name:$tag,draft:false,prerelease:$prerelease,target_commitish:$commit,html_url:("https://github.com/tailrocks/velnor/releases/tag/" + $tag),published_at:"2026-09-19T00:00:00Z",assets:$assets}' \
     > "$work/releases/$id"
@@ -204,8 +243,26 @@ jq -s -c . "$work/releases/222" "$work/releases/122" > "$work/page-2"
 cat "$work/page-1" "$work/page-2" > "$work/pages.json"
 export FAKE_ROOT="$work" PATH="$work/bin:$PATH"
 
+# This is the manifest emitted by the native producer's rendered assembly
+# contract. Keep provider release metadata and payload bytes synthetic below,
+# but make the consumer test fail if its checked-in canonical producer bytes
+# drift from the exact schema2 contract.
+native_fixture="$root/tests/fixtures/native-product/product-manifest.json"
+native_fixture_sidecar="$native_fixture.sha256"
+native_fixture_sha=$(sha256 "$native_fixture")
+[ "$(awk 'NF == 2 {print $1 "  " $2}' "$native_fixture_sidecar")" = "$native_fixture_sha  product-manifest.json" ]
+jq -e '
+  (keys | sort) == ["artifacts","channel","components","product_id","release_id","release_tag","schema","source_commit","source_ref","source_repository","version"] and
+  .schema == "velnor.product-manifest/v1" and .product_id == "velnor" and
+  (.release_id | type == "string" and test("^[1-9][0-9]*$")) and
+  (.components | length == 3) and (.components | all(.targets | length == 4)) and
+  (.artifacts | length == 18) and
+  ((.artifacts | map(.kind) | sort | group_by(.) | map({kind:.[0],count:length})) ==
+    [{kind:"apt-package",count:2},{kind:"archive",count:2},{kind:"binary",count:12},{kind:"homebrew-archive",count:2}])
+' "$native_fixture" >/dev/null
+
 "$script" --channel stable > "$work/stable.json"
-jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="222" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
+jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="222" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest.components | length == 3) and (.manifest.components | all(.targets | length == 4)) and (.manifest.artifacts | length == 18) and ((.manifest.artifacts | map(.kind) | sort | group_by(.) | map({kind:.[0],count:length})) == [{kind:"apt-package",count:2},{kind:"archive",count:2},{kind:"binary",count:12},{kind:"homebrew-archive",count:2}]) and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
 "$script" --channel stable --version v1.2.2 > "$work/explicit.json"
 jq -e --arg commit "$c122" '.tag=="v1.2.2" and .source_commit==$commit' "$work/explicit.json" >/dev/null
 
@@ -236,10 +293,13 @@ expect_failure requested-preview-leading-zero "$script" --channel preview --vers
 
 # SemVer components and preview sequences are canonical decimals. Leading
 # zeroes must not create a second spelling of a provider release/version.
+attestation_asset_id=$(jq -er '.assets[] | select(.name == "release-attestation.json") | .id' "$work/releases/222")
 for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/manifests/$path" "$work/baseline-$path"; done
+cp "$work/manifests/$attestation_asset_id" "$work/baseline-attestation"
 cp "$work/releases/222" "$work/baseline-release-222"
 restore_candidate() {
   for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/baseline-$path" "$work/manifests/$path"; done
+  cp "$work/baseline-attestation" "$work/manifests/$attestation_asset_id"
   cp "$work/baseline-release-222" "$work/releases/222"
   jq -s -c . "$work/releases/222" > "$work/pages.json"
 }
@@ -260,6 +320,21 @@ jq 'del(.assets[] | select(.name == "release-attestation.json"))' "$work/release
 mv "$work/releases/222.tmp" "$work/releases/222"
 jq -s -c . "$work/releases/222" > "$work/pages.json"
 expect_failure missing-release-attestation "$script" --channel stable
+
+restore_candidate
+jq '.release_id = "999"' "$work/manifests/$attestation_asset_id" > "$work/manifests/$attestation_asset_id.tmp"
+mv "$work/manifests/$attestation_asset_id.tmp" "$work/manifests/$attestation_asset_id"
+expect_failure release-attestation-identity "$script" --channel stable
+
+restore_candidate
+jq '.release_url = "https://evil.example/releases/tag/v1.2.3"' "$work/manifests/$attestation_asset_id" > "$work/manifests/$attestation_asset_id.tmp"
+mv "$work/manifests/$attestation_asset_id.tmp" "$work/manifests/$attestation_asset_id"
+expect_failure release-attestation-url "$script" --channel stable
+
+restore_candidate
+jq '.assets[0].sha256 = ("f" * 64)' "$work/manifests/$attestation_asset_id" > "$work/manifests/$attestation_asset_id.tmp"
+mv "$work/manifests/$attestation_asset_id.tmp" "$work/manifests/$attestation_asset_id"
+expect_failure release-attestation-assets "$script" --channel stable
 
 restore_candidate
 
@@ -293,6 +368,20 @@ jq '.components[] |= if .name == "velnorctl" then .binary = "evilctl" else . end
 mv "$work/manifests/222.tmp" "$work/manifests/222"
 sha256 "$work/manifests/222" > "$work/manifests/223"
 expect_failure binary-name-drift "$script" --channel stable
+
+restore_candidate
+jq '(.artifacts[] | select(.kind == "archive" and .target == "x86_64-unknown-linux-gnu")).target = "aarch64-unknown-linux-gnu"' \
+  "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure archive-target-census "$script" --channel stable
+
+restore_candidate
+jq '(.artifacts[0].kind) = "unknown-artifact"' \
+  "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure unknown-artifact-kind "$script" --channel stable
 
 restore_candidate
 printf 'tampered\n' > "$work/manifests/22201"
