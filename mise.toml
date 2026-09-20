@@ -49,7 +49,7 @@ depends = ["check"]
 depends = ["verify-release-test"]
 
 [tasks.test]
-depends = ["package-update-test"]
+depends = ["package-update-test", "release-discovery-test"]
 
 [tasks.lint]
 depends = ["actionlint", "shellcheck"]

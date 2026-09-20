@@ -13,25 +13,25 @@ set -euo pipefail
 endpoint=$(printf '%s\n' "$*" | awk '{print $NF}')
 case "$*" in
   *"repos/tailrocks/velnor")
-    if env | rg -q '^FAKE_REPOSITORY_FAILURE=1$'; then exit 25; fi
+    if [ "${FAKE_REPOSITORY_FAILURE:-}" = 1 ]; then exit 25; fi
     jq -cn \
       --arg full_name "${FAKE_REPOSITORY_FULL_NAME:-tailrocks/velnor}" \
       --argjson id "${FAKE_REPOSITORY_ID:-1255367013}" \
       '{id:$id,full_name:$full_name}'
     ;;
   *"releases?per_page=100")
-    if env | rg -q '^FAKE_API_FAILURE=1$'; then exit 23; fi
+    if [ "${FAKE_API_FAILURE:-}" = 1 ]; then exit 23; fi
     cat "$FAKE_ROOT/pages.json"
     ;;
   *"/releases/assets/"*)
-    if env | rg -q '^FAKE_MANIFEST_FAILURE=1$'; then exit 24; fi
+    if [ "${FAKE_MANIFEST_FAILURE:-}" = 1 ]; then exit 24; fi
     id=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
     cat "$FAKE_ROOT/manifests/$id"
     ;;
   *"/git/ref/tags/"*)
     tag=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
     commit=$(jq -s -er --arg tag "$tag" 'first(add[] | select(.tag_name == $tag) | .target_commitish)' "$FAKE_ROOT/pages.json")
-    if env | rg -q '^FAKE_REF_MISMATCH=1$'; then commit=ffffffffffffffffffffffffffffffffffffffff; fi
+    if [ "${FAKE_REF_MISMATCH:-}" = 1 ]; then commit=ffffffffffffffffffffffffffffffffffffffff; fi
     jq -cn --arg commit "$commit" '{object:{type:"commit",sha:$commit}}'
     ;;
   *"/compare/main..."*)
