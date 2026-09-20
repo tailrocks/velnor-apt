@@ -2,7 +2,13 @@ schema = 1
 
 [generator]
 repository = "tailrocks/velnor-apt"
-revision = "03f9409b3f649a8973169dde0ebba3fe58a92ac9"
+# D19 pin: the velnor-workflow BUILD commit whose product rendered this tree.
+# The pin names the product's build revision (the policy validator requires
+# the product's --revision to equal the pin), not necessarily the main head:
+# main may advance without generator changes and reuse this product with an
+# identical closure (e.g. the 19811e71 recovery merge reuses 048a7bda's
+# velnor-workflow-runtime-v1-32565cc6272a84d4 byte for byte).
+revision = "fdeed261bd2247a38db6922a7726cd45d3d6f31e"
 
 [workflow]
 profile = "apt-repository"
@@ -11,50 +17,47 @@ automatic = "both"
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 default_branch = "main"
-files = ["ci.yml", "ci-apt.yml", "package-update.yml", "package-updater.yml", "publish.yml", "renovate.yml"]
+pull_request_on_velnor = true
+files = ["ci-pr.yml", "ci-policy.yml", "ci-main.yml", "nightly.yml", "maintenance.yml", "release.yml", "renovate.yml", "renovate-validate.yml"]
+
+[policy]
+ruleset_required_status_checks = ["ci-required"]
+ruleset_external_status_checks = ["DCO"]
+
+[renovate]
+enabled = true
+reason = "Scheduled dependency PRs per renovate.json. The writer runs on github-hosted runners: the feed repository has no declared trusted Velnor writer label, and writer execution is independent of CI unit lanes."
+lanes = "github"
+
+[release]
+enabled = true
+reason = "APT feed publisher: verify-before-mutation feed workflow for the velnor-runner Debian repository."
+kind = "apt"
+package = "velnor-runner"
+binary = "velnor-runner"
+source_repository = "tailrocks/velnor"
+consumer_repository = "tailrocks/velnor-apt"
+manifest_schema = "velnor.package-release.v1"
+signer_fingerprint = "7E66E3A53F9B3B5CA61D0F53261EDAC957DEB801"
+passphrase_secret = "APT_GPG_PASSPHRASE"
+signing_key_secret = "APT_GPG_PRIVATE_KEY"
+keyring_path = "velnor.gpg"
+apt_origin = "Velnor"
+apt_feed_url = "https://velnor-apt.tailrocks.com"
+description = "apt repository for the Velnor self-hosted GitHub Actions runner"
+retention = 1
+
+[[declare]]
+primitive = "renovate"
+file = "renovate.yml"
+
+[[declare]]
+primitive = "renovate-validate"
+file = "renovate-validate.yml"
 
 [[units]]
 id = "docs"
 label = "Documentation"
 kind = "docs"
 root = "."
-
-[[static_files]]
-file = ".github/workflows/ci.yml"
-source = ".github-gen/sources/workflows/ci.yml"
-
-[[static_files]]
-file = ".github/workflows/ci-apt.yml"
-source = ".github-gen/sources/workflows/ci-apt.yml"
-
-[[static_files]]
-file = ".github/workflows/package-update.yml"
-source = ".github-gen/sources/workflows/package-update.yml"
-
-[[static_files]]
-file = ".github/workflows/package-updater.yml"
-source = ".github-gen/sources/workflows/package-updater.yml"
-
-[[static_files]]
-file = ".github/workflows/publish.yml"
-source = ".github-gen/sources/workflows/publish.yml"
-
-[[static_files]]
-file = ".github/workflows/renovate.yml"
-source = ".github-gen/sources/workflows/renovate.yml"
-
-[[static_files]]
-file = ".github/actions/aggregate/action.yml"
-source = ".github-gen/sources/actions/aggregate/action.yml"
-
-[[static_files]]
-file = ".github/actions/cache-contract/action.yml"
-source = ".github-gen/sources/actions/cache-contract/action.yml"
-
-[[static_files]]
-file = ".github/actions/run-gate/action.yml"
-source = ".github-gen/sources/actions/run-gate/action.yml"
-
-[[static_files]]
-file = ".github/workflows/AGENTS.md"
-source = ".github-gen/sources/workflows-AGENTS.md"
+ci_tasks = ["check"]
