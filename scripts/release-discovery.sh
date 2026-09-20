@@ -302,6 +302,7 @@ release_assets_are_well_formed() {
   jq -e '
     ((.assets | type) == "array" and (.assets | length) > 0) and
     ([.assets[].name] | (length == (unique | length))) and
+    ([.assets[].id] | (length == (unique | length))) and
     all(.assets[];
       ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$"))) and
       (.state == "uploaded") and
@@ -857,6 +858,7 @@ validate_selection_contract() {
     (.provider_release_id | type == "number" and . > 0 and floor == .) and
     (.provider_repository_id | type == "number" and . > 0 and floor == .) and
     (.release_assets | type == "array" and length > 0 and
+      ([.[].id] | length == (unique | length)) and
       all(.[];
         (keys | sort) == ["browser_download_url","id","name","size","state"] and
         (.id | type == "number" and . > 0 and floor == .) and
@@ -865,6 +867,13 @@ validate_selection_contract() {
         .state == "uploaded" and
         (.browser_download_url | type == "string")) and
       any(.[]; .name == "release-attestation.json")) and
+    (([.release_assets[].name] | sort) ==
+      (([.manifest.artifacts[].name] +
+        [.manifest.artifacts[] | select(.kind == "apt-package") | .name + ".sha256"] +
+        ["product-manifest.json", "product-manifest.json.sha256",
+         "release-record.json", "release-record.json.sha256", "manifest.json",
+         "manifest.json.sha256", "release-manifest.json", "SHA256SUMS",
+         "release-attestation.json"]) | sort)) and
     (.source_ref_resolution | type == "object") and
     (.manifest | type == "object" and
       .schema == "velnor.product-manifest/v1" and
