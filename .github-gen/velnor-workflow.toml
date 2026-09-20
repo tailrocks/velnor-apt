@@ -61,3 +61,7 @@ label = "Documentation"
 kind = "docs"
 root = "."
 ci_tasks = ["check"]
+# `mise run check` needs these lock pins. Without them the GitHub docs job
+# sets up mise with install:false and never installs, so a lockfile bump
+# cold-caches and fails actionlint 127 before ci-required can pass.
+mise_tools = ["actionlint", "gh", "jq", "shellcheck"]

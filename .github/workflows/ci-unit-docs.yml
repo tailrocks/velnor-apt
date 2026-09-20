@@ -232,10 +232,12 @@ jobs:
               chmod 0444 "$marker" 2>/dev/null || true
             fi
           fi
-      - name: Set up Mise
+      - name: Set up Mise tools
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install: false
+          install_args: ${{ inputs.mise_tools }}
+          cache: true
+          cache_save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
       - name: Mark tool bootstrap end
         if: always()
         run: |
@@ -425,6 +427,13 @@ jobs:
               chmod 0444 "$marker" 2>/dev/null || true
             fi
           fi
+      - name: Install declared Mise tools
+        env:
+          MISE_TOOLS: ${{ inputs.mise_tools }}
+        run: |
+          set -euo pipefail
+          read -ra tools <<<"$MISE_TOOLS"
+          mise --yes install "${tools[@]}"
       - name: Mark tool bootstrap end
         if: always()
         run: |
