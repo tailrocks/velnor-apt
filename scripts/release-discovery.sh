@@ -318,11 +318,12 @@ release_asset_urls_are_canonical() {
 manifest_assets_are_well_formed() {
   local manifest="$1"
   jq -e '
-    ((.artifacts | type) == "array" and (.artifacts | length) > 0) and
+    ((.artifacts | type) == "array" and (.artifacts | length) == 18) and
     ([.artifacts[].name] | (length == (unique | length))) and
     all(.artifacts[];
       ((keys | sort) == ["kind","name","sha256","size","target"]) and
-      ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$"))) and
+      ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$")) and
+       .name != "discovery.json" and .name != "product-manifest.json") and
       (.target | type == "string" and
         (. == "x86_64-unknown-linux-gnu" or
          . == "aarch64-unknown-linux-gnu" or
@@ -332,8 +333,38 @@ manifest_assets_are_well_formed() {
       ((.sha256 | type) == "string" and (.sha256 | test("^[0-9a-f]{64}$"))) and
       (.size | type == "number" and . > 0 and floor == .)
     ) and
-    ((.components | type) == "array" and (.components | length) > 0) and
-    ([.components[].name] | (length == (unique | length)))
+    ((.components | type) == "array" and (.components | length) == 3) and
+    ([.components[].name] | (sort == ["velnor-runner","velnor-workflow","velnorctl"])) and
+    all(.components[];
+      (keys | sort) == ["binary","crate","feature","identity","name","targets","version"] and
+      (.name == .crate and .name == .binary) and
+      (.feature == null or .feature == "release-build") and
+      (.identity == "version" or .identity == "revision") and
+      (.version | type == "string" and test("^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$")) and
+      (.targets | type == "array" and
+        (sort == ["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-apple-darwin","x86_64-unknown-linux-gnu"]))
+    ) and
+    all(.artifacts[]; .kind == "binary" or .kind == "archive" or .kind == "homebrew-archive" or .kind == "apt-package") and
+    (([.artifacts[] | select(.kind == "binary")] | length) == 12) and
+    (([.artifacts[] | select(.kind == "apt-package")] | length) == 2) and
+    (([.artifacts[] | select(.kind == "archive" or .kind == "homebrew-archive")] | length) == 4) and
+    (. as $manifest |
+      [$manifest.components[].binary] as $binaries |
+      (["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-apple-darwin"] as $targets |
+        ([$manifest.artifacts[] | select(.kind == "binary")] as $binary_rows |
+          all($binary_rows[]; . as $row |
+            any($binaries[]; . as $binary | $row.name == ($binary + "-" + $row.target))) and
+          all($binaries[]; . as $binary |
+            all($targets[]; . as $target |
+              ([$binary_rows[] | select(.name == ($binary + "-" + $target) and .target == $target)] | length) == 1)) and
+          all($targets[]; . as $target |
+            ([$manifest.artifacts[] | select(.target == $target and .kind ==
+              (if ($target | endswith("-apple-darwin")) then "homebrew-archive" else "archive" end))] | length) == 1) and
+          ([$manifest.artifacts[] | select(.kind == "apt-package" and .target == "x86_64-unknown-linux-gnu")] | length) == 1 and
+          ([$manifest.artifacts[] | select(.kind == "apt-package" and .target == "aarch64-unknown-linux-gnu")] | length) == 1
+        )
+      )
+    )
   ' "$manifest" >/dev/null 2>/dev/null
 }
 
@@ -393,6 +424,33 @@ validate_manifest_artifact_bytes() {
     [ "$actual_size" = "$artifact_size" ] || return 1
     [ "$release_size" = "$artifact_size" ] || return 1
   done < <(jq -r '.artifacts[] | [.name,.sha256,(.size | tostring)] | @tsv' "$manifest_file")
+}
+
+validate_release_attestation() {
+  local release="$1" tag="$2" source_ref="$3" source_commit="$4" manifest_sha="$5" manifest_file="$6"
+  local attestation_id attestation_file provider_release_id actual_assets expected_assets
+  provider_release_id="$(jq -er '.id | numbers | tostring' <<<"$release")" || return 1
+  attestation_id="$(release_asset_id "$release" release-attestation.json)" || return 1
+  attestation_file="$tmp_dir/release-attestation-$attestation_id.json"
+  fetch_asset "$attestation_id" "$attestation_file" release-attestation.json
+  jq -e \
+    --arg schema "velnor.github-release-attestation/v1" \
+    --arg repository "$SOURCE_REPOSITORY" --arg source_ref "$source_ref" \
+    --arg source_commit "$source_commit" --arg tag "$tag" \
+    --arg release_id "$provider_release_id" --arg release_url "https://github.com/$SOURCE_REPOSITORY/releases/tag/$tag" \
+    --arg manifest_sha "$manifest_sha" \
+    '((keys | sort) == ["assets","manifest_sha256","provider","release_id","release_tag","release_url","resolved_source_commit","resolved_source_ref","schema","source_commit","source_ref","source_repository","target_commitish"]) and
+     .schema == $schema and .provider == "github" and
+     .source_repository == $repository and .source_ref == $source_ref and
+     .source_commit == $source_commit and .resolved_source_ref == $source_ref and
+     .resolved_source_commit == $source_commit and .release_tag == $tag and
+     .release_id == $release_id and .target_commitish == $source_commit and
+     .release_url == $release_url and .manifest_sha256 == $manifest_sha and
+     (.assets | type == "array")' \
+    "$attestation_file" >/dev/null 2>/dev/null || return 1
+  actual_assets="$(jq -S '.assets' "$attestation_file")" || return 1
+  expected_assets="$(jq -S '.artifacts' "$manifest_file")" || return 1
+  [ "$actual_assets" = "$expected_assets" ] || return 1
 }
 
 validate_sha256sums() {
@@ -573,16 +631,18 @@ validate_product_manifest() {
   fi
 
   # Runtime-only releases do not have this complete application component set.
+  # Keep this projection identical to the native producer's four-target
+  # component contract; APT filters only the two Linux package rows below.
   jq -e '
     ([.components[].name] | sort) == ["velnor-runner","velnor-workflow","velnorctl"] and
     all(.components[];
-      (keys | sort) == ["binary","crate","name","targets","version"] and
-      ((.name == "velnor-runner" and .crate == "velnor-runner" and .binary == "velnor-runner") or
-       (.name == "velnorctl" and .crate == "velnorctl" and .binary == "velnorctl") or
-       (.name == "velnor-workflow" and .crate == "velnor-workflow" and .binary == "velnor-workflow")) and
-      (.version | type == "string") and
+      (keys | sort) == ["binary","crate","feature","identity","name","targets","version"] and
+      (.name == .crate and .name == .binary) and
+      (.feature == null or .feature == "release-build") and
+      (.identity == "version" or .identity == "revision") and
+      (.version | type == "string" and test("^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$")) and
       (.targets | type == "array" and
-        (sort == ["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-unknown-linux-gnu"]))
+        (sort == ["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-apple-darwin","x86_64-unknown-linux-gnu"]))
     )
   ' "$manifest_file" >/dev/null 2>/dev/null || return 1
 
@@ -694,6 +754,7 @@ validate_candidate() {
     [ -z "$REQUESTED_VERSION" ] || [ "$REQUESTED_VERSION" = "$version" ] || [ "$REQUESTED_VERSION" = "$tag" ] || return 1
   fi
   validate_product_manifest "$release" "$manifest_file" "$tag" "$version" "$source_ref" "$source_commit" || return 1
+  validate_release_attestation "$release" "$tag" "$source_ref" "$source_commit" "$manifest_sha" "$manifest_file" || return 1
 
   local required_asset
   for required_asset in \
