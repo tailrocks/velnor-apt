@@ -31,12 +31,14 @@ case "$*" in
     ;;
   *"/git/ref/tags/"*)
     tag=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
+    if [ -n "${FAKE_FAIL_REF_TAG:-}" ] && [ "$tag" = "$FAKE_FAIL_REF_TAG" ]; then exit 26; fi
     commit=$(jq -s -er --arg tag "$tag" 'first(add[] | select(.tag_name == $tag) | .target_commitish)' "$FAKE_ROOT/pages.json")
     if [ "${FAKE_REF_MISMATCH:-}" = 1 ]; then commit=ffffffffffffffffffffffffffffffffffffffff; fi
     jq -cn --arg commit "$commit" '{object:{type:"commit",sha:$commit}}'
     ;;
   *"/compare/main..."*)
     commit=$(printf '%s\n' "$endpoint" | sed 's#^.*/compare/main\.\.\.##')
+    if [ -n "${FAKE_FAIL_COMPARE_COMMIT:-}" ] && [ "$commit" = "$FAKE_FAIL_COMPARE_COMMIT" ]; then exit 27; fi
     case "${FAKE_PREVIEW_BRANCH_MODE:-behind}" in
       behind)
         jq -cn --arg commit "$commit" '{status:"behind",base_commit:{sha:("8888888888888888888888888888888888888888")},merge_base_commit:{sha:$commit}}'
@@ -311,6 +313,12 @@ pcommit=7777777777777777777777777777777777777777
 ptag=preview-7777777777777777777777777777777777777777
 make_manifest 777 "$pver" "$ptag" refs/heads/main "$pcommit" "velnor-runner-preview-$pdot-arm64.deb" "velnor-runner-preview-$pdot-amd64.deb" true
 make_release 777 "$ptag" true "$pcommit" "velnor-runner-preview-$pdot-amd64.deb" "velnor-runner-preview-$pdot-arm64.deb" true
+pver8=1.2.3-preview.8+8888888
+pdot8=1.2.3.preview.8+8888888
+pcommit8=8888888888888888888888888888888888888888
+ptag8=preview-8888888888888888888888888888888888888888
+make_manifest 888 "$pver8" "$ptag8" refs/heads/main "$pcommit8" "velnor-runner-preview-$pdot8-arm64.deb" "velnor-runner-preview-$pdot8-amd64.deb" true
+make_release 888 "$ptag8" true "$pcommit8" "velnor-runner-preview-$pdot8-amd64.deb" "velnor-runner-preview-$pdot8-arm64.deb" true
 jq -s -c . "$work/releases/777" > "$work/pages.json"
 printf stable-retained > "$work/package-state.json"
 printf preview-retained > "$work/package-state-preview.json"
@@ -416,6 +424,25 @@ if grep -q '"version":"1.2.3"' "$work/mixed-newer-sidecar-api-fail-older-valid.s
   exit 1
 fi
 [ ! -s "$work/mixed-newer-sidecar-api-fail-older-valid.stdout" ]
+# Newer tag-ref transport failure must abort, not emit older 1.2.3.
+restore_candidate
+jq -s -c . "$work/releases/555" "$work/releases/222" > "$work/pages.json"
+expect_failure mixed-newer-ref-api-fail-older-valid env FAKE_FAIL_REF_TAG=v1.2.4 "$script" --channel stable
+grep -F 'GitHub API failed while resolving tag ref' "$work/mixed-newer-ref-api-fail-older-valid.stderr" >/dev/null
+if grep -q '"version":"1.2.3"' "$work/mixed-newer-ref-api-fail-older-valid.stdout"; then
+  echo "tag-ref provider failure selected older release" >&2
+  exit 1
+fi
+[ ! -s "$work/mixed-newer-ref-api-fail-older-valid.stdout" ]
+# Newer preview compare transport failure must abort, not emit preview.7.
+jq -s -c . "$work/releases/888" "$work/releases/777" > "$work/pages.json"
+expect_failure mixed-newer-compare-api-fail-older-valid env FAKE_FAIL_COMPARE_COMMIT=8888888888888888888888888888888888888888 "$script" --channel preview
+grep -F 'GitHub API failed while comparing main' "$work/mixed-newer-compare-api-fail-older-valid.stderr" >/dev/null
+if grep -q '1.2.3-preview.7' "$work/mixed-newer-compare-api-fail-older-valid.stdout"; then
+  echo "compare provider failure selected older preview" >&2
+  exit 1
+fi
+[ ! -s "$work/mixed-newer-compare-api-fail-older-valid.stdout" ]
 jq -S -n '{id:778,tag_name:"preview",draft:false,prerelease:true,target_commitish:"7777777777777777777777777777777777777777",html_url:"https://example.invalid/preview",published_at:"2026-09-19T00:00:00Z",assets:[]}' > "$work/releases/778"
 jq -s -c . "$work/releases/778" > "$work/pages.json"
 expect_failure rolling-preview "$script" --channel preview
