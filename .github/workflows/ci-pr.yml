@@ -124,7 +124,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_runner: true
+      mise_tools: "actionlint gh jq shellcheck"
       unit_admission: github
   velnor-docs:
     name: "Documentation · Documentation"
@@ -139,6 +139,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      mise_tools: "actionlint gh jq shellcheck"
       unit_admission: velnor
   ci-required:
     name: ci-required
