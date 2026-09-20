@@ -14,7 +14,10 @@ endpoint=$(printf '%s\n' "$*" | awk '{print $NF}')
 case "$*" in
   *"repos/tailrocks/velnor")
     if env | rg -q '^FAKE_REPOSITORY_FAILURE=1$'; then exit 25; fi
-    jq -cn '{id:1255367013,full_name:"tailrocks/velnor"}'
+    jq -cn \
+      --arg full_name "${FAKE_REPOSITORY_FULL_NAME:-tailrocks/velnor}" \
+      --argjson id "${FAKE_REPOSITORY_ID:-1255367013}" \
+      '{id:$id,full_name:$full_name}'
     ;;
   *"releases?per_page=100")
     if env | rg -q '^FAKE_API_FAILURE=1$'; then exit 23; fi
@@ -228,6 +231,8 @@ expect_failure api-failure env FAKE_API_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while listing releases' "$work/api-failure.stderr" >/dev/null
 expect_failure repository-api-failure env FAKE_REPOSITORY_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while fetching repository identity' "$work/repository-api-failure.stderr" >/dev/null
+expect_failure repository-identity-mismatch env FAKE_REPOSITORY_FULL_NAME=evil/repo "$script" --channel stable
+grep -F 'GitHub API repository identity does not match the selected source' "$work/repository-identity-mismatch.stderr" >/dev/null
 expect_failure asset-api-failure env FAKE_MANIFEST_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while fetching' "$work/asset-api-failure.stderr" >/dev/null
 jq -S -n '{id:778,tag_name:"preview",draft:false,prerelease:true,target_commitish:"7777777777777777777777777777777777777777",html_url:"https://example.invalid/preview",published_at:"2026-09-19T00:00:00Z",assets:[]}' > "$work/releases/778"
