@@ -26,6 +26,7 @@ case "$*" in
   *"/releases/assets/"*)
     if [ "${FAKE_MANIFEST_FAILURE:-}" = 1 ]; then exit 24; fi
     id=$(printf '%s\n' "$endpoint" | sed 's#^.*/##')
+    if [ -n "${FAKE_FAIL_ASSET_ID:-}" ] && [ "$id" = "$FAKE_FAIL_ASSET_ID" ]; then exit 24; fi
     cat "$FAKE_ROOT/manifests/$id"
     ;;
   *"/git/ref/tags/"*)
@@ -225,6 +226,9 @@ make_manifest 122 1.2.2 v1.2.2 refs/tags/v1.2.2 "$c122" velnor-runner-1.2.2-arm6
 make_release 122 v1.2.2 false "$c122" velnor-runner-1.2.2-amd64.deb velnor-runner-1.2.2-arm64.deb true
 make_manifest 222 1.2.3 v1.2.3 refs/tags/v1.2.3 "$c123" velnor-runner-1.2.3-arm64.deb velnor-runner-1.2.3-amd64.deb true
 make_release 222 v1.2.3 false "$c123" velnor-runner-1.2.3-amd64.deb velnor-runner-1.2.3-arm64.deb true
+c124=1212121212121212121212121212121212121212
+make_manifest 555 1.2.4 v1.2.4 refs/tags/v1.2.4 "$c124" velnor-runner-1.2.4-arm64.deb velnor-runner-1.2.4-amd64.deb true
+make_release 555 v1.2.4 false "$c124" velnor-runner-1.2.4-amd64.deb velnor-runner-1.2.4-arm64.deb true
 make_manifest 999 9.9.9 v9.9.9 refs/tags/v9.9.9 "$c999" velnor-runner-9.9.9-arm64.deb velnor-runner-9.9.9-amd64.deb false
 make_release 999 v9.9.9 false "$c999" velnor-runner-9.9.9-amd64.deb velnor-runner-9.9.9-arm64.deb false
 make_manifest 333 7.7.7 v7.7.7 refs/tags/v7.7.7 "$c999" velnor-runner-7.7.7-arm64.deb velnor-runner-7.7.7-amd64.deb true
@@ -320,7 +324,8 @@ jq -e --arg version "$pver" --arg commit "$pcommit" '.tag=="preview-"+$commit an
 expect_failure() {
   local name="$1"; shift
   local stderr="$work/$name.stderr"
-  if "$@" > /dev/null 2> "$stderr"; then echo "expected failure: $name" >&2; exit 1; fi
+  local stdout="$work/$name.stdout"
+  if "$@" > "$stdout" 2> "$stderr"; then echo "expected failure: $name" >&2; exit 1; fi
 }
 
 expect_failure requested-stable-leading-zero "$script" --channel stable --version v01.2.3
@@ -390,6 +395,27 @@ expect_failure repository-identity-mismatch env FAKE_REPOSITORY_FULL_NAME=evil/r
 grep -F 'GitHub API repository identity does not match the selected source' "$work/repository-identity-mismatch.stderr" >/dev/null
 expect_failure asset-api-failure env FAKE_MANIFEST_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while fetching' "$work/asset-api-failure.stderr" >/dev/null
+# Newer listed release fails the provider fetch; older remains valid. A
+# swallowed fail() would emit 1.2.3. Provider errors must abort instead.
+restore_candidate
+jq -s -c . "$work/releases/555" "$work/releases/222" > "$work/pages.json"
+expect_failure mixed-newer-api-fail-older-valid env FAKE_FAIL_ASSET_ID=555 "$script" --channel stable
+grep -F 'GitHub API failed while fetching' "$work/mixed-newer-api-fail-older-valid.stderr" >/dev/null
+if grep -q '"version":"1.2.3"' "$work/mixed-newer-api-fail-older-valid.stdout"; then
+  echo "provider failure selected older release" >&2
+  exit 1
+fi
+[ ! -s "$work/mixed-newer-api-fail-older-valid.stdout" ]
+# Sidecar 556 is fetched only from validate_external_manifest_digest (was $()).
+restore_candidate
+jq -s -c . "$work/releases/555" "$work/releases/222" > "$work/pages.json"
+expect_failure mixed-newer-sidecar-api-fail-older-valid env FAKE_FAIL_ASSET_ID=556 "$script" --channel stable
+grep -F 'GitHub API failed while fetching' "$work/mixed-newer-sidecar-api-fail-older-valid.stderr" >/dev/null
+if grep -q '"version":"1.2.3"' "$work/mixed-newer-sidecar-api-fail-older-valid.stdout"; then
+  echo "sidecar provider failure selected older release" >&2
+  exit 1
+fi
+[ ! -s "$work/mixed-newer-sidecar-api-fail-older-valid.stdout" ]
 jq -S -n '{id:778,tag_name:"preview",draft:false,prerelease:true,target_commitish:"7777777777777777777777777777777777777777",html_url:"https://example.invalid/preview",published_at:"2026-09-19T00:00:00Z",assets:[]}' > "$work/releases/778"
 jq -s -c . "$work/releases/778" > "$work/pages.json"
 expect_failure rolling-preview "$script" --channel preview
