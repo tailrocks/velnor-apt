@@ -43,6 +43,11 @@ USAGE
 
 fail() {
   printf 'release-discovery: ERROR: %s\n' "$*" >&2
+  # Command substitution subshells swallow `exit`. TERM the selector process
+  # so a provider failure cannot be treated as candidate ineligibility.
+  if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+    kill -s TERM $$
+  fi
   exit 1
 }
 
@@ -184,6 +189,7 @@ fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "$tmp_dir"' EXIT
+trap 'rm -rf -- "$tmp_dir"; exit 1' TERM
 
 fetch_releases() {
   # --paginate is intentional. The newest release can be a runtime product or
@@ -513,8 +519,10 @@ validate_subordinate_records() {
 
   release_manifest_id="$(release_asset_id "$release" release-manifest.json)" || return 1
   release_manifest_file="$tmp_dir/release-manifest-$release_manifest_id.json"
-  record_file="$(verify_asset_digest "$release" release-record.json)" || return 1
-  package_file="$(verify_asset_digest "$release" manifest.json)" || return 1
+  verify_asset_digest "$release" release-record.json > "$tmp_dir/release-record.path" || return 1
+  record_file="$(cat "$tmp_dir/release-record.path")"
+  verify_asset_digest "$release" manifest.json > "$tmp_dir/package-manifest.path" || return 1
+  package_file="$(cat "$tmp_dir/package-manifest.path")"
   fetch_asset "$release_manifest_id" "$release_manifest_file" release-manifest.json
 
   [ "$(parent_manifest_digest "$record_file")" = "$manifest_sha" ] || return 1
@@ -757,7 +765,8 @@ validate_candidate() {
   manifest_id="$(release_asset_id "$release" "$PRODUCT_MANIFEST_ASSET")" || return 1
   manifest_file="$tmp_dir/product-manifest-$manifest_id.json"
   fetch_asset "$manifest_id" "$manifest_file" "$PRODUCT_MANIFEST_ASSET"
-  manifest_sha="$(validate_external_manifest_digest "$release" "$manifest_file")" || return 1
+  validate_external_manifest_digest "$release" "$manifest_file" > "$tmp_dir/manifest.sha256" || return 1
+  manifest_sha="$(cat "$tmp_dir/manifest.sha256")"
 
   version="$(jq -er '.version | strings' "$manifest_file" 2>/dev/null)" || return 1
   if [ "$CHANNEL" = preview ]; then
@@ -840,7 +849,10 @@ validate_candidate() {
 # binding that handoff relies on.
 validate_selection_contract() {
   local selection="$1"
-  jq -e '
+  jq -e \
+    --arg manifest_asset "$PRODUCT_MANIFEST_ASSET" \
+    --arg manifest_sidecar "$PRODUCT_MANIFEST_ASSET.sha256" \
+    '
     (keys | sort) == [
       "channel","manifest","manifest_asset","manifest_schema",
       "manifest_sha256","package","product_id","provider_release_id",
@@ -851,7 +863,7 @@ validate_selection_contract() {
     ] and
     (.channel == "stable" or .channel == "preview") and
     .product_id == "velnor" and
-    .manifest_asset == "product-manifest.json" and
+    .manifest_asset == $manifest_asset and
     .manifest_schema == "velnor.product-manifest/v1" and
     (.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
     (.release_id | type == "string" and test("^[1-9][0-9]*$")) and
@@ -870,7 +882,7 @@ validate_selection_contract() {
     (([.release_assets[].name] | sort) ==
       (([.manifest.artifacts[].name] +
         [.manifest.artifacts[] | select(.kind == "apt-package") | .name + ".sha256"] +
-        ["product-manifest.json", "product-manifest.json.sha256",
+        [$manifest_asset, $manifest_sidecar,
          "release-record.json", "release-record.json.sha256", "manifest.json",
          "manifest.json.sha256", "release-manifest.json", "SHA256SUMS",
          "release-attestation.json"]) | sort)) and
@@ -898,7 +910,11 @@ candidates="$tmp_dir/candidates.jsonl"
 release_count="$(jq 'length' <<<"$releases")"
 for ((index = 0; index < release_count; index += 1)); do
   release="$(jq -c ".[$index]" <<<"$releases")"
-  if candidate="$(validate_candidate "$release")"; then
+  candidate_file="$tmp_dir/candidate-$index.json"
+  # Do not capture validate_candidate in $(); fetch_asset calls fail(), and a
+  # subshell would turn a provider error into an ineligible candidate.
+  if validate_candidate "$release" > "$candidate_file"; then
+    candidate="$(cat "$candidate_file")"
     if validate_selection_contract "$candidate"; then
       printf '%s\n' "$candidate" >> "$candidates"
     fi
