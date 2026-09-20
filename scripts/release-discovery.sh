@@ -13,10 +13,10 @@ PRODUCT_MANIFEST_ASSET="product-manifest.json"
 RELEASE_RECORD_SCHEMA="velnor.release-record/v1"
 PACKAGE_RELEASE_SCHEMA="velnor.package-release.v1"
 APT_ARTIFACT_KIND="apt-package"
-# Producer-owned release IDs are immutable provider identities. This grammar
-# deliberately permits repository-qualified IDs (`owner/repo/...`); Homebrew
-# must consume this same pattern rather than silently narrowing it.
-RELEASE_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._:/-]*$'
+# Producer-owned release IDs are immutable GitHub provider identities. APT and
+# Homebrew share this positive canonical decimal grammar; the manifest value
+# must also equal the release object's provider ID.
+RELEASE_ID_PATTERN='^[1-9][0-9]*$'
 CHANNEL="stable"
 REQUESTED_VERSION=""
 
@@ -541,6 +541,8 @@ validate_subordinate_records() {
 
 validate_product_manifest() {
   local release="$1" manifest_file="$2" tag="$3" version="$4" source_ref="$5" source_commit="$6"
+  local provider_release_id
+  provider_release_id="$(jq -er '.id | numbers | select(. > 0 and floor == .)' <<<"$release")" || return 1
 
   # Sole application authority. Exact keys exclude any self-digest field;
   # canonical bytes are hashed externally by the sidecar and records.
@@ -550,11 +552,13 @@ validate_product_manifest() {
     --arg expected_commit "$source_commit" --arg expected_tag "$tag" \
     --arg expected_version "$version" --arg channel "$CHANNEL" \
     --arg release_id_pattern "$RELEASE_ID_PATTERN" \
+    --argjson expected_release_id "$provider_release_id" \
     '((keys | sort) == ["artifacts","channel","components","product_id","release_id","release_tag","schema","source_commit","source_ref","source_repository","version"]) and
      .schema == $schema and .product_id == $product and .channel == $channel and
      .source_repository == $repository and .source_ref == $expected_ref and
      .source_commit == $expected_commit and .release_tag == $expected_tag and
      (.release_id | type == "string" and test($release_id_pattern)) and
+     (.release_id == ($expected_release_id | tostring)) and
      .version == $expected_version and
      (.source_commit | test("^[0-9a-f]{40}$")) and
      (.version | if $channel == "stable" then test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")

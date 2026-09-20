@@ -84,7 +84,7 @@ make_manifest() {
     '[{name:$amd,target:"x86_64-unknown-linux-gnu",kind:"apt-package",sha256:$amd_sha,size:$amd_size}] +
      (if $ok then [{name:$arm,target:"aarch64-unknown-linux-gnu",kind:"apt-package",sha256:$arm_sha,size:$arm_size}] else [] end)')
   jq -S -n --arg version "$version" --arg tag "$tag" --arg ref "$ref" --arg commit "$commit" \
-    --arg release_id "fixture-$tag" --argjson artifacts "$artifacts" --argjson components "$(components)" \
+    --arg release_id "$id" --argjson artifacts "$artifacts" --argjson components "$(components)" \
     '{schema:"velnor.product-manifest/v1",product_id:"velnor",
       channel:(if ($version|test("-preview[.]")) then "preview" else "stable" end),
       version:$version,source_repository:"tailrocks/velnor",source_ref:$ref,source_commit:$commit,
@@ -193,7 +193,7 @@ cat "$work/page-1" "$work/page-2" > "$work/pages.json"
 export FAKE_ROOT="$work" PATH="$work/bin:$PATH"
 
 "$script" --channel stable > "$work/stable.json"
-jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="fixture-v1.2.3" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
+jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="222" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
 "$script" --channel stable --version v1.2.2 > "$work/explicit.json"
 jq -e --arg commit "$c122" '.tag=="v1.2.2" and .source_commit==$commit' "$work/explicit.json" >/dev/null
 
@@ -224,6 +224,14 @@ expect_failure requested-preview-leading-zero "$script" --channel preview --vers
 
 # SemVer components and preview sequences are canonical decimals. Leading
 # zeroes must not create a second spelling of a provider release/version.
+for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/manifests/$path" "$work/baseline-$path"; done
+cp "$work/releases/222" "$work/baseline-release-222"
+restore_candidate() {
+  for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/baseline-$path" "$work/manifests/$path"; done
+  cp "$work/baseline-release-222" "$work/releases/222"
+  jq -s -c . "$work/releases/222" > "$work/pages.json"
+}
+
 jq '.tag_name = "v01.2.3"' "$work/releases/222" > "$work/releases/222.tmp"
 mv "$work/releases/222.tmp" "$work/releases/222"
 jq -s -c . "$work/releases/222" > "$work/pages.json"
@@ -234,6 +242,8 @@ mv "$work/manifests/777.tmp" "$work/manifests/777"
 sha256 "$work/manifests/777" > "$work/manifests/778"
 jq -s -c . "$work/releases/777" > "$work/pages.json"
 expect_failure preview-leading-zero-version "$script" --channel preview
+
+restore_candidate
 
 (cd "$work" && expect_failure preview-source-not-ancestor env FAKE_PREVIEW_BRANCH_MODE=non-ancestor "$script" --channel preview)
 grep -F 'no eligible preview application release' "$work/preview-source-not-ancestor.stderr" >/dev/null
@@ -259,14 +269,6 @@ grep -F 'no eligible preview application release' "$work/rolling-preview.stderr"
 
 # Hostile mutations stay internally byte-addressed where practical. Each
 # mutation must make the typed application candidate ineligible.
-for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/manifests/$path" "$work/baseline-$path"; done
-cp "$work/releases/222" "$work/baseline-release-222"
-restore_candidate() {
-  for path in 222 223 224 225 22201 22202 226 22203; do cp "$work/baseline-$path" "$work/manifests/$path"; done
-  cp "$work/baseline-release-222" "$work/releases/222"
-  jq -s -c . "$work/releases/222" > "$work/pages.json"
-}
-
 restore_candidate
 jq '.components[] |= if .name == "velnorctl" then .binary = "evilctl" else . end' \
   "$work/manifests/222" > "$work/manifests/222.tmp"
@@ -318,7 +320,7 @@ restore_candidate
 expect_failure source-ref-mismatch env FAKE_REF_MISMATCH=1 "$script" --channel stable
 
 restore_candidate
-jq '.id = 223 | .html_url = "https://github.com/tailrocks/velnor/releases/tag/v1.2.3"' \
+jq '.id = 222 | .html_url = "https://github.com/tailrocks/velnor/releases/tag/v1.2.3"' \
   "$work/releases/222" > "$work/releases/duplicate"
 jq -s -c . "$work/releases/222" "$work/releases/duplicate" > "$work/pages.json"
 expect_failure ambiguous-version "$script" --channel stable
@@ -328,6 +330,18 @@ jq '.release_id = "bad release id"' "$work/manifests/222" > "$work/manifests/222
 mv "$work/manifests/222.tmp" "$work/manifests/222"
 sha256 "$work/manifests/222" > "$work/manifests/223"
 expect_failure release-id-grammar "$script" --channel stable
+
+restore_candidate
+jq '.release_id = "0222"' "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure release-id-leading-zero "$script" --channel stable
+
+restore_candidate
+jq '.release_id = "223"' "$work/manifests/222" > "$work/manifests/222.tmp"
+mv "$work/manifests/222.tmp" "$work/manifests/222"
+sha256 "$work/manifests/222" > "$work/manifests/223"
+expect_failure release-id-provider-mismatch "$script" --channel stable
 
 restore_candidate
 jq '.version = 999' "$work/manifests/226" > "$work/manifests/226.tmp"
