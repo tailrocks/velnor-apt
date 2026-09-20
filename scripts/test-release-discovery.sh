@@ -218,6 +218,23 @@ expect_failure() {
   local stderr="$work/$name.stderr"
   if "$@" > /dev/null 2> "$stderr"; then echo "expected failure: $name" >&2; exit 1; fi
 }
+
+expect_failure requested-stable-leading-zero "$script" --channel stable --version v01.2.3
+expect_failure requested-preview-leading-zero "$script" --channel preview --version 01.2.3-preview.7+7777777
+
+# SemVer components and preview sequences are canonical decimals. Leading
+# zeroes must not create a second spelling of a provider release/version.
+jq '.tag_name = "v01.2.3"' "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure stable-leading-zero-tag "$script" --channel stable
+
+jq '.version = "01.2.3-preview.7+7777777"' "$work/manifests/777" > "$work/manifests/777.tmp"
+mv "$work/manifests/777.tmp" "$work/manifests/777"
+sha256 "$work/manifests/777" > "$work/manifests/778"
+jq -s -c . "$work/releases/777" > "$work/pages.json"
+expect_failure preview-leading-zero-version "$script" --channel preview
+
 (cd "$work" && expect_failure preview-source-not-ancestor env FAKE_PREVIEW_BRANCH_MODE=non-ancestor "$script" --channel preview)
 grep -F 'no eligible preview application release' "$work/preview-source-not-ancestor.stderr" >/dev/null
 jq -s -c . "$work/releases/901" > "$work/pages.json"

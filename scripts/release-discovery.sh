@@ -49,6 +49,42 @@ is_package_name() {
   [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]
 }
 
+is_canonical_decimal() {
+  [[ "$1" =~ ^(0|[1-9][0-9]*)$ ]]
+}
+
+is_bare_version() {
+  local value="$1" major minor patch extra
+  IFS='.' read -r major minor patch extra <<< "$value"
+  [ -z "$extra" ] || return 1
+  is_canonical_decimal "$major" \
+    && is_canonical_decimal "$minor" \
+    && is_canonical_decimal "$patch"
+}
+
+is_stable_tag() {
+  local tag="$1"
+  [[ "$tag" == v* ]] || return 1
+  is_bare_version "${tag#v}"
+}
+
+is_preview_version() {
+  local value="$1" base rest sequence sha
+  [[ "$value" == *-preview.*+* ]] || return 1
+  base="${value%%-preview.*}"
+  rest="${value#*-preview.}"
+  sequence="${rest%%+*}"
+  sha="${rest#*+}"
+  [ -n "$base" ] && [ -n "$sequence" ] && [ -n "$sha" ] \
+    && is_bare_version "$base" \
+    && is_canonical_decimal "$sequence" \
+    && [[ "$sha" =~ ^[0-9a-f]{7}$ ]]
+}
+
+is_preview_tag() {
+  [[ "$1" =~ ^preview-[0-9a-f]{40}$ ]]
+}
+
 is_asset_name() {
   [[ "$1" =~ ^[A-Za-z0-9._+~-]+$ ]]
 }
@@ -133,11 +169,11 @@ is_package_name "$PACKAGE" || fail "invalid package name: $PACKAGE"
 is_asset_name "$PRODUCT_MANIFEST_ASSET" || fail "invalid product manifest asset: $PRODUCT_MANIFEST_ASSET"
 
 if [ "$CHANNEL" = stable ] && [ -n "$REQUESTED_VERSION" ]; then
-  [[ "$REQUESTED_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  is_stable_tag "$REQUESTED_VERSION" \
     || fail "stable version must be a vX.Y.Z tag: $REQUESTED_VERSION"
 fi
 if [ "$CHANNEL" = preview ] && [ -n "$REQUESTED_VERSION" ]; then
-  [[ "$REQUESTED_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+\+[0-9a-f]{7}|preview-[0-9a-f]{40})$ ]] \
+  (is_preview_version "$REQUESTED_VERSION" || is_preview_tag "$REQUESTED_VERSION") \
     || fail "preview version must be X.Y.Z-preview.N+<7-hex> or preview-<40-hex>: $REQUESTED_VERSION"
 fi
 
@@ -521,8 +557,8 @@ validate_product_manifest() {
      (.release_id | type == "string" and test($release_id_pattern)) and
      .version == $expected_version and
      (.source_commit | test("^[0-9a-f]{40}$")) and
-     (.version | if $channel == "stable" then test("^[0-9]+\\.[0-9]+\\.[0-9]+$")
-       else test("^[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[0-9]+\\+[0-9a-f]{7}$") end)' \
+     (.version | if $channel == "stable" then test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
+       else test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-preview\\.(0|[1-9][0-9]*)\\+[0-9a-f]{7}$") end)' \
     "$manifest_file" >/dev/null 2>/dev/null || return 1
 
   manifest_assets_are_well_formed "$manifest_file" || return 1
@@ -620,14 +656,14 @@ validate_candidate() {
     '.html_url == $expected_url' <<<"$release" >/dev/null || return 1
   if [ "$CHANNEL" = stable ]; then
     [ "$prerelease" = false ] || return 1
-    [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+    is_stable_tag "$tag" || return 1
     version="${tag#v}"
     [ -z "$REQUESTED_VERSION" ] || [ "$REQUESTED_VERSION" = "$tag" ] || return 1
     source_ref="refs/tags/$tag"
   else
     # A rolling `preview` pointer is an index, never a package source.
-    [[ "$tag" =~ ^preview-([0-9a-f]{40})$ ]] || return 1
-    preview_tag_commit="${BASH_REMATCH[1]}"
+    is_preview_tag "$tag" || return 1
+    preview_tag_commit="${tag#preview-}"
     [ "$prerelease" = true ] || return 1
     source_ref="refs/heads/main"
   fi
