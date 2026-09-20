@@ -701,6 +701,7 @@ validate_candidate() {
     "$PRODUCT_MANIFEST_ASSET.sha256" \
     release-manifest.json \
     SHA256SUMS \
+    release-attestation.json \
     release-record.json \
     release-record.json.sha256 \
     manifest.json \

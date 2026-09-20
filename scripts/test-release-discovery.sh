@@ -122,17 +122,29 @@ make_manifest() {
 }
 make_release() {
   local id="$1" tag="$2" prerelease="$3" commit="$4" amd="$5" arm="$6" include_arm="$7"
-  local next=$((id * 100 + 1)) assets='[]' name obj body
+  local next=$((id * 100 + 1)) assets='[]' name obj body attestation_file manifest_sha
   local amd_sha arm_sha
   amd_sha=$(sha256 "$work/manifests/payload-$id-amd")
   arm_sha=$(sha256 "$work/manifests/payload-$id-arm")
-  for name in product-manifest.json product-manifest.json.sha256 release-manifest.json SHA256SUMS release-record.json release-record.json.sha256 manifest.json manifest.json.sha256; do
+  manifest_sha=$(sha256 "$work/manifests/$id")
+  attestation_file="$work/manifests/attestation-$id"
+  jq -S -n --arg source_ref "$(jq -er '.source_ref' "$work/manifests/$id")" \
+    --arg source_commit "$commit" --arg tag "$tag" --arg release_id "$id" \
+    --arg manifest_sha "$manifest_sha" --argjson artifacts "$(jq -c '.artifacts' "$work/manifests/$id")" \
+    '{schema:"velnor.github-release-attestation/v1",provider:"github",
+      source_repository:"tailrocks/velnor",source_ref:$source_ref,source_commit:$source_commit,
+      resolved_source_ref:$source_ref,resolved_source_commit:$source_commit,release_tag:$tag,
+      release_id:$release_id,target_commitish:$source_commit,
+      release_url:("https://github.com/tailrocks/velnor/releases/tag/" + $tag),
+      manifest_sha256:$manifest_sha,assets:$artifacts}' > "$attestation_file"
+  for name in product-manifest.json product-manifest.json.sha256 release-manifest.json SHA256SUMS release-record.json release-record.json.sha256 manifest.json manifest.json.sha256 release-attestation.json; do
     body=''
     case "$name" in
       product-manifest.json) body="$work/manifests/$id"; obj=$(asset "$id" "$name" "$tag" "$body") ;;
       product-manifest.json.sha256) body="$work/manifests/$((id + 1))"; obj=$(asset "$((id + 1))" "$name" "$tag" "$body") ;;
       release-record.json) body="$work/manifests/$((id + 2))"; obj=$(asset "$((id + 2))" "$name" "$tag" "$body") ;;
       release-manifest.json) body="$work/manifests/$((id + 3))"; obj=$(asset "$((id + 3))" "$name" "$tag" "$body") ;;
+      release-attestation.json) body="$attestation_file"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
       SHA256SUMS) printf '%s  %s\n%s  %s\n' "$amd_sha" "$amd" "$arm_sha" "$arm" > "$work/manifests/$next"; body="$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$body"); next=$((next + 1)) ;;
       manifest.json) body="$work/manifests/$((id + 4))"; obj=$(asset "$((id + 4))" "$name" "$tag" "$body") ;;
       release-record.json.sha256) cp "$work/manifests/$((id + 2)).sha256" "$work/manifests/$next"; obj=$(asset "$next" "$name" "$tag" "$work/manifests/$next"); next=$((next + 1)) ;;
@@ -181,9 +193,9 @@ mv "$work/manifests/333.tmp" "$work/manifests/333"
 sha256 "$work/manifests/333" > "$work/manifests/334"
 make_release 333 v7.7.7 false "$c999" velnor-runner-7.7.7-amd64.deb velnor-runner-7.7.7-arm64.deb true
 make_manifest 444 6.6.6 v6.6.6 refs/tags/v6.6.6 "$c999" velnor-runner-6.6.6-arm64.deb velnor-runner-6.6.6-amd64.deb true
+make_release 444 v6.6.6 false "$c999" velnor-runner-6.6.6-amd64.deb velnor-runner-6.6.6-arm64.deb true
 printf '%s\n' '{malformed' > "$work/manifests/444"
 sha256 "$work/manifests/444" > "$work/manifests/445"
-make_release 444 v6.6.6 false "$c999" velnor-runner-6.6.6-amd64.deb velnor-runner-6.6.6-arm64.deb true
 
 jq -S -n '{id:901,tag_name:"velnor-workflow-runtime-v1-newer",draft:false,prerelease:false,target_commitish:"5555555555555555555555555555555555555555",html_url:"https://example.invalid/runtime",published_at:"2026-09-19T00:00:00Z",assets:[{id:90101,name:"manifest.json",size:1,state:"uploaded",browser_download_url:"https://example.invalid/runtime"}]}' > "$work/releases/901"
 jq -S -n '{id:902,tag_name:"v8.0.0",draft:false,prerelease:true,target_commitish:"6666666666666666666666666666666666666666",html_url:"https://example.invalid/pre",published_at:"2026-09-19T00:00:00Z",assets:[]}' > "$work/releases/902"
@@ -242,6 +254,12 @@ mv "$work/manifests/777.tmp" "$work/manifests/777"
 sha256 "$work/manifests/777" > "$work/manifests/778"
 jq -s -c . "$work/releases/777" > "$work/pages.json"
 expect_failure preview-leading-zero-version "$script" --channel preview
+
+restore_candidate
+jq 'del(.assets[] | select(.name == "release-attestation.json"))' "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure missing-release-attestation "$script" --channel stable
 
 restore_candidate
 
