@@ -397,6 +397,21 @@ grep -F 'no eligible preview application release' "$work/rolling-preview.stderr"
 
 # Hostile mutations stay internally byte-addressed where practical. Each
 # mutation must make the typed application candidate ineligible.
+restore_candidate
+jq '.assets += [{id:999999,name:"unexpected-extra.txt",size:1,state:"uploaded",browser_download_url:"https://github.com/tailrocks/velnor/releases/download/v1.2.3/unexpected-extra.txt"}]' \
+  "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure extra-release-asset "$script" --channel stable
+
+restore_candidate
+duplicate_asset_id=$(jq -er '.assets[0].id' "$work/releases/222")
+jq --argjson duplicate_id "$duplicate_asset_id" '.assets[1].id = $duplicate_id' \
+  "$work/releases/222" > "$work/releases/222.tmp"
+mv "$work/releases/222.tmp" "$work/releases/222"
+jq -s -c . "$work/releases/222" > "$work/pages.json"
+expect_failure duplicate-release-asset-id "$script" --channel stable
+
 for control_name in discovery.json product-manifest.json product-manifest.json.sha256 \
   release-manifest.json SHA256SUMS release-record.json release-record.json.sha256 \
   manifest.json manifest.json.sha256 release-attestation.json; do
