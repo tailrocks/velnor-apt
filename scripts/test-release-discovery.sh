@@ -12,6 +12,10 @@ cat > "$work/bin/gh" <<'SH'
 set -euo pipefail
 endpoint=$(printf '%s\n' "$*" | awk '{print $NF}')
 case "$*" in
+  *"repos/tailrocks/velnor")
+    if env | rg -q '^FAKE_REPOSITORY_FAILURE=1$'; then exit 25; fi
+    jq -cn '{id:1255367013,full_name:"tailrocks/velnor"}'
+    ;;
   *"releases?per_page=100")
     if env | rg -q '^FAKE_API_FAILURE=1$'; then exit 23; fi
     cat "$FAKE_ROOT/pages.json"
@@ -186,7 +190,7 @@ cat "$work/page-1" "$work/page-2" > "$work/pages.json"
 export FAKE_ROOT="$work" PATH="$work/bin:$PATH"
 
 "$script" --channel stable > "$work/stable.json"
-jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="fixture-v1.2.3" and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
+jq -e --arg commit "$c123" '.tag=="v1.2.3" and .version=="1.2.3" and .source_commit==$commit and .release_id=="fixture-v1.2.3" and .provider_repository_id==1255367013 and .provider_release_id==222 and .manifest.schema=="velnor.product-manifest/v1" and (.manifest_sha256|test("^[0-9a-f]{64}$"))' "$work/stable.json" >/dev/null
 "$script" --channel stable --version v1.2.2 > "$work/explicit.json"
 jq -e --arg commit "$c122" '.tag=="v1.2.2" and .source_commit==$commit' "$work/explicit.json" >/dev/null
 
@@ -222,6 +226,8 @@ grep -F 'no eligible stable application release' "$work/old-only.stderr" >/dev/n
 jq -s -c . "$work/releases/222" > "$work/pages.json"
 expect_failure api-failure env FAKE_API_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while listing releases' "$work/api-failure.stderr" >/dev/null
+expect_failure repository-api-failure env FAKE_REPOSITORY_FAILURE=1 "$script" --channel stable
+grep -F 'GitHub API failed while fetching repository identity' "$work/repository-api-failure.stderr" >/dev/null
 expect_failure asset-api-failure env FAKE_MANIFEST_FAILURE=1 "$script" --channel stable
 grep -F 'GitHub API failed while fetching' "$work/asset-api-failure.stderr" >/dev/null
 jq -S -n '{id:778,tag_name:"preview",draft:false,prerelease:true,target_commitish:"7777777777777777777777777777777777777777",html_url:"https://example.invalid/preview",published_at:"2026-09-19T00:00:00Z",assets:[]}' > "$work/releases/778"

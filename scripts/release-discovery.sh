@@ -152,6 +152,15 @@ fetch_releases() {
     "repos/$SOURCE_REPOSITORY/releases?per_page=100"
 }
 
+fetch_repository() {
+  # The repository ID is provider identity, not application metadata. Read it
+  # directly from the provider API before inspecting any candidate release;
+  # neither the product manifest nor its release attestation can supply it.
+  gh api \
+    --header 'Accept: application/vnd.github+json' \
+    "repos/$SOURCE_REPOSITORY"
+}
+
 fetch_asset() {
   local asset_id="$1" destination="$2" label="$3"
   # A listed asset is part of candidate provenance. A failed fetch is an API
@@ -220,6 +229,15 @@ resolve_preview_branch_ancestry() {
     }
   ' <<<"$compare_json"
 }
+
+provider_repository="$(fetch_repository)" \
+  || fail "GitHub API failed while fetching repository identity"
+provider_repository_id="$(jq -er \
+  '.id | numbers | select(. > 0 and floor == .)' <<<"$provider_repository")" \
+  || fail "GitHub API repository identity has no positive numeric ID"
+jq -e --arg repository "$SOURCE_REPOSITORY" \
+  '.full_name | strings == $repository' <<<"$provider_repository" >/dev/null \
+  || fail "GitHub API repository identity does not match the selected source"
 
 release_asset_id() {
   local release="$1" name="$2"
@@ -664,6 +682,7 @@ validate_candidate() {
     --arg manifest_schema "$PRODUCT_MANIFEST_SCHEMA" \
     --arg manifest_sha256 "$manifest_sha" \
     --arg release_url "$expected_release_url" \
+    --argjson provider_repository_id "$provider_repository_id" \
     --argjson preview_branch_provenance "$preview_branch_provenance" \
     --slurpfile manifest "$manifest_file" \
     '(
@@ -683,6 +702,7 @@ validate_candidate() {
       manifest_schema: $manifest_schema,
       manifest_sha256: $manifest_sha256,
       release_id: $manifest[0].release_id,
+      provider_repository_id: $provider_repository_id,
       provider_release_id: .id,
       release_url: $release_url,
       published_at: .published_at,
