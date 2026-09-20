@@ -13,6 +13,11 @@ PRODUCT_MANIFEST_ASSET="product-manifest.json"
 RELEASE_RECORD_SCHEMA="velnor.release-record/v1"
 PACKAGE_RELEASE_SCHEMA="velnor.package-release.v1"
 APT_ARTIFACT_KIND="apt-package"
+# These names are producer/control records, not downloadable product payloads.
+# A product artifact may not shadow any of them; otherwise a manifest can turn
+# a control record into an executable/package row while the release still has
+# a second object with the same semantic role.
+CONTROL_ASSET_NAMES_JSON='["discovery.json","product-manifest.json","product-manifest.json.sha256","release-manifest.json","SHA256SUMS","release-record.json","release-record.json.sha256","manifest.json","manifest.json.sha256","release-attestation.json"]'
 # Producer-owned release IDs are immutable GitHub provider identities. APT and
 # Homebrew share this positive canonical decimal grammar; the manifest value
 # must also equal the release object's provider ID.
@@ -317,13 +322,14 @@ release_asset_urls_are_canonical() {
 
 manifest_assets_are_well_formed() {
   local manifest="$1"
-  jq -e '
+  jq -e --argjson control_names "$CONTROL_ASSET_NAMES_JSON" '
     ((.artifacts | type) == "array" and (.artifacts | length) == 18) and
     ([.artifacts[].name] | (length == (unique | length))) and
     all(.artifacts[];
+      . as $artifact |
       ((keys | sort) == ["kind","name","sha256","size","target"]) and
       ((.name | type) == "string" and (.name | test("^[A-Za-z0-9._+~-]+$")) and
-       .name != "discovery.json" and .name != "product-manifest.json") and
+       ($control_names | index($artifact.name) | not)) and
       (.target | type == "string" and
         (. == "x86_64-unknown-linux-gnu" or
          . == "aarch64-unknown-linux-gnu" or
@@ -427,6 +433,9 @@ validate_manifest_artifact_bytes() {
 }
 
 validate_release_attestation() {
+  # This is typed admission and byte/inventory equality only. It is deliberately
+  # not cryptographic verification; the central runtime must invoke its real
+  # provider-attestation verifier before publication or installation.
   local release="$1" tag="$2" source_ref="$3" source_commit="$4" manifest_sha="$5" manifest_file="$6"
   local attestation_id attestation_file provider_release_id actual_assets expected_assets
   provider_release_id="$(jq -er '.id | numbers | tostring' <<<"$release")" || return 1

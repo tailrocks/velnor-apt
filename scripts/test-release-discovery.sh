@@ -76,9 +76,10 @@ make_manifest() {
   local amd_payload="$work/manifests/payload-$id-$amd" arm_payload="$work/manifests/payload-$id-$arm"
   local amd_sha arm_sha amd_size arm_size
 
-  # Disposable producer-shaped generation. The native producer's canonical
-  # assembly emits this four-target/18-row inventory; these bytes exercise the
-  # consumer census without claiming provider or signing authority.
+  # Disposable schema-compatible generation. The unique 18-row census is 12
+  # binaries + 4 archives (2 Linux archives + 2 Apple Homebrew archives) + 2
+  # APT packages. Native 990 intentionally blocks Intel and does not emit this
+  # complete provider inventory; these bytes never claim producer authority.
   for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
     while IFS=$'\t' read -r component; do
       asset_name="$component-$target"
@@ -243,14 +244,29 @@ jq -s -c . "$work/releases/222" "$work/releases/122" > "$work/page-2"
 cat "$work/page-1" "$work/page-2" > "$work/pages.json"
 export FAKE_ROOT="$work" PATH="$work/bin:$PATH"
 
-# This is the manifest emitted by the native producer's rendered assembly
-# contract. Keep provider release metadata and payload bytes synthetic below,
-# but make the consumer test fail if its checked-in canonical producer bytes
-# drift from the exact schema2 contract.
+# This is a schema-shaped synthetic fixture. It is not a native 990 release:
+# that producer intentionally blocks Intel and therefore has no complete
+# four-target provider output. Keep provider release metadata and payload bytes
+# synthetic below; fail if the checked-in fixture drifts from the reviewed
+# schema2 contract. Renderer provenance is recorded beside the fixture.
 native_fixture="$root/tests/fixtures/native-product/product-manifest.json"
 native_fixture_sidecar="$native_fixture.sha256"
+native_fixture_provenance="$root/tests/fixtures/native-product/provenance.json"
 native_fixture_sha=$(sha256 "$native_fixture")
 [ "$(awk 'NF == 2 {print $1 "  " $2}' "$native_fixture_sidecar")" = "$native_fixture_sha  product-manifest.json" ]
+jq -e --arg fixture_sha "$native_fixture_sha" '
+  .fixture_status == "synthetic-schema-fixture" and
+  .provider_authoritative == false and
+  .cryptographic_attestation_verified == false and
+  .native_renderer_commit == "9908296d28d27e0d5b993d1e48ea7a96bc31db83" and
+  .native_renderer_result == "1 passed, 1868 filtered out" and
+  .renderer_output_persisted == false and
+  .fixture_manifest_sha256 == $fixture_sha and
+  (.blocked_native_targets == ["x86_64-apple-darwin"])
+' "$native_fixture_provenance" >/dev/null
+# The 18 rows are unique: 12 binaries + 4 archives (2 Linux archive plus 2
+# Apple Homebrew archive) + 2 APT packages. Homebrew rows are in the archive
+# total, not an additional count.
 jq -e '
   (keys | sort) == ["artifacts","channel","components","product_id","release_id","release_tag","schema","source_commit","source_ref","source_repository","version"] and
   .schema == "velnor.product-manifest/v1" and .product_id == "velnor" and
@@ -362,6 +378,18 @@ grep -F 'no eligible preview application release' "$work/rolling-preview.stderr"
 
 # Hostile mutations stay internally byte-addressed where practical. Each
 # mutation must make the typed application candidate ineligible.
+for control_name in discovery.json product-manifest.json product-manifest.json.sha256 \
+  release-manifest.json SHA256SUMS release-record.json release-record.json.sha256 \
+  manifest.json manifest.json.sha256 release-attestation.json; do
+  restore_candidate
+  jq --arg name "$control_name" '.artifacts[0].name = $name' \
+    "$work/manifests/222" > "$work/manifests/222.tmp"
+  mv "$work/manifests/222.tmp" "$work/manifests/222"
+  sha256 "$work/manifests/222" > "$work/manifests/223"
+  control_test_name=$(printf '%s' "$control_name" | tr '[:upper:].' '[:lower:]-')
+  expect_failure "reserved-control-$control_test_name" "$script" --channel stable
+done
+
 restore_candidate
 jq '.components[] |= if .name == "velnorctl" then .binary = "evilctl" else . end' \
   "$work/manifests/222" > "$work/manifests/222.tmp"
