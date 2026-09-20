@@ -1,0 +1,21 @@
+{
+  "fixture_status": "synthetic-schema-fixture",
+  "provider_authoritative": false,
+  "cryptographic_attestation_verified": false,
+  "native_source_repository": "tailrocks/velnor",
+  "native_source_branch": "codex/github-first-native-product-v3",
+  "native_renderer_commit": "9908296d28d27e0d5b993d1e48ea7a96bc31db83",
+  "native_renderer_test": "rendered_native_product_assembly_produces_runner_and_homebrew_contract_bytes",
+  "native_renderer_command": "cargo test --locked --manifest-path crates/velnor-workflow/Cargo.toml rendered_native_product_assembly_produces_runner_and_homebrew_contract_bytes -- --nocapture",
+  "native_renderer_result": "1 passed, 1868 filtered out",
+  "native_renderer_source_sha256": "6afac0b36563a82c82c28bd7272e5d6e0c0b81579b2ade9ab4ee99cfe8e6449f",
+  "native_input_contract_sha256": "e117ea2b2a5522c57d409da9b55e065735032fd03e8954286e67c3b6562fc7e7",
+  "blocked_native_targets": ["x86_64-apple-darwin"],
+  "renderer_output_persisted": false,
+  "fixture_manifest_sha256": "87d27be4173b4f6e00eef05013ff725f11c604042ccc4db0e8f8fd034dfca6e6",
+  "fixture_checksum_file_sha256": "cd35df59e2eddc690ada562e1327f62355b1711c16f1ee1a6ee4069c5f1c72e3",
+  "fixture_manifest_source_commit": "0123456789abcdef0123456789abcdef01234567",
+  "fixture_manifest_release_id": "12345",
+  "fixture_census": "12 binary + 4 archive (2 Linux archive + 2 Apple homebrew-archive, subset not additive) + 2 apt-package = 18 unique rows",
+  "authority_note": "The native test uses temporary synthetic inputs and removes its output. This checked-in manifest is a consumer-shape fixture only; provider bytes, release identity, and cryptographic attestation require the native producer and central verifier handoff."
+}
