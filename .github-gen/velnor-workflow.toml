@@ -3,7 +3,7 @@ schema = 2
 [generator]
 repository = "tailrocks/velnor-apt"
 # D19 pin: the velnor-workflow BUILD commit whose product rendered this tree.
-revision = "4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0"
+revision = "eed474c4a1d9b071fd1b5de00c769c8997398e5a"
 
 [workflow]
 providers = ["github-hosted"]
