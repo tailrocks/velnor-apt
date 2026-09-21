@@ -1,33 +1,36 @@
-schema = 1
+schema = 2
 
 [generator]
 repository = "tailrocks/velnor-apt"
 # D19 pin: the velnor-workflow BUILD commit whose product rendered this tree.
-# The pin names the product's build revision (the policy validator requires
-# the product's --revision to equal the pin), not necessarily the main head:
-# main may advance without generator changes and reuse this product with an
-# identical closure (e.g. the 19811e71 recovery merge reuses 048a7bda's
-# velnor-workflow-runtime-v1-32565cc6272a84d4 byte for byte).
-revision = "fdeed261bd2247a38db6922a7726cd45d3d6f31e"
+revision = "4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0"
 
 [workflow]
-profile = "apt-repository"
-runners = "both"
-automatic = "both"
-github_runner = "ubuntu-24.04"
-velnor_labels = ["self-hosted", "velnor-target-mvp"]
+providers = ["github-hosted"]
+automatic_providers = ["github-hosted"]
 default_branch = "main"
-pull_request_on_velnor = true
-files = ["ci-pr.yml", "ci-policy.yml", "ci-main.yml", "nightly.yml", "maintenance.yml", "release.yml", "renovate.yml", "renovate-validate.yml"]
+profile = "apt-repository"
+
+[workflow.selectors.github-hosted]
+runs_on = ["ubuntu-24.04"]
 
 [policy]
-ruleset_required_status_checks = ["ci-required"]
+ruleset_required_status_checks = ["ci-required", "Policy"]
 ruleset_external_status_checks = ["DCO"]
 
-[renovate]
-enabled = true
-reason = "Scheduled dependency PRs per renovate.json. The writer runs on github-hosted runners: the feed repository has no declared trusted Velnor writer label, and writer execution is independent of CI unit lanes."
-lanes = "github"
+# [renovate] DEFERRED (W4 escalation): s2 `validate_renovate`
+# (s2/config/mod.rs) requires the velnor provider +
+# [workflow.selectors.velnor], but `enforce_visibility_policy` (s2/mod.rs)
+# requires public repos to be exactly [github-hosted] and rejects a velnor
+# selector — so [renovate] is unsatisfiable on public repos at this pin.
+# The renderer itself is provider-agnostic (`control_plane_runner`), so the
+# fix is validation-only (generator side). Re-add with [[declare]]
+# renovate + renovate-validate rows once the generator admits a hosted
+# writer for public repos; until then renovate.yml/renovate-validate.yml
+# are absent from the tree.
+# [renovate]
+# enabled = true
+# reason = "Scheduled dependency PRs per renovate.json. ..."
 
 [release]
 enabled = true
@@ -48,12 +51,8 @@ description = "apt repository for the Velnor self-hosted GitHub Actions runner"
 retention = 1
 
 [[declare]]
-primitive = "renovate"
-file = "renovate.yml"
-
-[[declare]]
-primitive = "renovate-validate"
-file = "renovate-validate.yml"
+primitive = "release"
+file = "release.yml"
 
 [[units]]
 id = "docs"

@@ -7,15 +7,6 @@ on:
     - cron: '17 4 * * *'
   workflow_dispatch:
     inputs:
-      runner:
-        description: Execution backend
-        required: false
-        default: github
-        type: choice
-        options:
-          - github
-          - velnor
-          - both
       channel:
         description: Package channel
         required: false
@@ -43,19 +34,8 @@ permissions:
   contents: read
 
 jobs:
-  admit-runner:
-    name: Admit feed runner
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Reject Velnor-only feed mutation
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.runner == 'velnor' }}
-        run: |
-          echo 'apt feed mutation publishes from GitHub only' >&2
-          exit 1
   verify:
     name: Verify apt feed
-    needs: [admit-runner]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -70,12 +50,11 @@ jobs:
           persist-credentials: false
       - name: Set up Velnor workflow runtime
         id: runtime
-        if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
         with:
-          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
+          rev: 4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0" >> "$GITHUB_ENV"
       - name: Enforce workflow policy
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -143,12 +122,13 @@ jobs:
         with:
           name: apt-incoming
           path: incoming
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 2
   publish:
     name: Publish apt feed
-    needs: [admit-runner, verify]
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.event.inputs.runner != 'velnor' }}
+    needs: [verify]
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: package-feed
@@ -165,12 +145,11 @@ jobs:
           persist-credentials: false
       - name: Set up Velnor workflow runtime
         id: runtime
-        if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
         with:
-          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
+          rev: 4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0" >> "$GITHUB_ENV"
       - name: Download verified feed inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -253,8 +232,8 @@ jobs:
           retention-days: 2
   deploy:
     name: Deploy apt feed
-    needs: [admit-runner, publish]
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.event.inputs.runner != 'velnor' }}
+    needs: [publish]
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: github-pages
@@ -269,12 +248,11 @@ jobs:
           persist-credentials: false
       - name: Set up Velnor workflow runtime
         id: runtime
-        if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@fdeed261bd2247a38db6922a7726cd45d3d6f31e
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
         with:
-          rev: fdeed261bd2247a38db6922a7726cd45d3d6f31e
+          rev: 4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=fdeed261bd2247a38db6922a7726cd45d3d6f31e" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=4dec6b9ec28b0d51cb370fd8f5d5401c6186adf0" >> "$GITHUB_ENV"
       - name: Download staged feed tree
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -301,7 +279,7 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
   feed-result:
     name: Feed result
-    needs: [admit-runner, verify, publish, deploy]
+    needs: [verify, publish, deploy]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
