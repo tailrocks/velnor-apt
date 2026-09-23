@@ -74,8 +74,13 @@ jobs:
           commit="$INPUT_COMMIT"
           if [ "$channel" = stable ]; then
             if [ -z "$version" ]; then
-              version="$(gh release list --repo 'tailrocks/velnor' --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')"
+              # GitHub release recency mixes application releases with
+              # velnor-workflow-runtime releases. Select only canonical
+              # application tags before resolving their source commit.
+              version="$(gh release list --repo 'tailrocks/velnor' --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq 'map(select((.tagName | startswith("velnor-workflow-runtime-") | not) and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))) | .[0].tagName // empty')"
             fi
+            [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              || { echo "::error::stable target is not an application release tag: $version" >&2; exit 1; }
             if [ -z "$commit" ]; then
               commit="$(velnor-workflow release apt-resolve-commit --source-repo 'tailrocks/velnor' --version "$version")"
             fi

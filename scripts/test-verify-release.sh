@@ -25,6 +25,11 @@ pass=0
 ok() { echo "ok - $1"; pass=$((pass + 1)); }
 die() { echo "FAIL - $1" >&2; exit 1; }
 
+grep -F -- 'velnor-workflow-runtime-' "$WORKFLOW" >/dev/null \
+  || die "release discovery does not name the excluded runtime release family"
+grep -F -- 'test("^v[0-9]+' "$WORKFLOW" >/dev/null \
+  || die "release discovery does not restrict stable targets to application tags"
+
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
   else shasum -a 256 "$1" | awk '{print $1}'; fi
@@ -44,6 +49,15 @@ BIN_ARM="$(sha256_str runner-arm64)"
 BASE="$WORK/base"
 mkdir -p "$BASE"
 
+POSTINST="$WORK/postinst"
+cat > "$POSTINST" <<'SH'
+#!/bin/sh
+systemctl show \
+  --property=CPUQuotaPerSecUSec --property=MemoryMax --property=MemoryHigh \
+  --property=MemorySwapMax --property=TasksMax --value velnor-jobs.slice
+SH
+chmod 0755 "$POSTINST"
+
 # --- shared identity fixtures (arch-independent, as the real deb ships) --------
 cat > "$BASE/manifest.json" <<JSON
 {"version":7,"source_sha":"$COMMIT","crate_version":"$VER","actions":[],"reusable_workflows":[]}
@@ -58,7 +72,7 @@ JSON
 # Hand-assemble a .deb (ar archive with data.tar.gz) shipping the identity files.
 make_fake_deb() {
   local out="$1" arch="$2" binary_bytes="${3:-runner-$2}" version="${4:-$VER}"
-  local identity="${5:-$WORK/build-identity.json}"
+  local identity="${5:-$WORK/build-identity.json}" postinst="${6:-$POSTINST}"
   local stage; stage="$(mktemp -d)"
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$identity" "$stage/root/usr/share/velnor/build-identity.json"
@@ -68,6 +82,8 @@ make_fake_deb() {
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
   printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$version" "$arch" > "$stage/ctl/control"
+  cp "$postinst" "$stage/ctl/postinst"
+  chmod 0755 "$stage/ctl/postinst"
   ( cd "$stage/ctl" && tar -czf "$stage/control.tar.gz" . )
   printf '2.0\n' > "$stage/debian-binary"
   ( cd "$stage" && rm -f "$out" && ar rcS "$out" debian-binary control.tar.gz data.tar.gz )
@@ -256,6 +272,7 @@ printf 'runner-amd64' > "$BAD_STAGE/root/usr/bin/velnor-runner"
 printf 'control-panel-amd64' > "$BAD_STAGE/root/usr/bin/velnorctl"
 ( cd "$BAD_STAGE/root" && tar -czf "$BAD_STAGE/data.tar.gz" . )
 mkdir -p "$BAD_STAGE/ctl"; printf 'Package: velnor-runner\n' > "$BAD_STAGE/ctl/control"
+cp "$POSTINST" "$BAD_STAGE/ctl/postinst"
 ( cd "$BAD_STAGE/ctl" && tar -czf "$BAD_STAGE/control.tar.gz" . )
 printf '2.0\n' > "$BAD_STAGE/debian-binary"
 ( cd "$BAD_STAGE" && rm -f "$D/velnor-runner-${VER}-amd64.deb" && ar rcS "$D/velnor-runner-${VER}-amd64.deb" debian-binary control.tar.gz data.tar.gz )
@@ -268,7 +285,24 @@ sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 rm -rf "$BAD_STAGE"
 expect_reject "packaged identity inside the deb disagrees with the commit" "$D"
 
-# 10. extracted binary bytes disagree with the independently recorded digest.
+# 10. postinst must validate all five effective workload-slice ceilings.
+D="$(fresh_copy neg_postinst)"
+BAD_POSTINST="$WORK/postinst-missing-quota"
+cat > "$BAD_POSTINST" <<'SH'
+#!/bin/sh
+systemctl show --property=CPUQuotaPerSecUSec --property=MemoryMax --property=MemoryHigh --value velnor-jobs.slice
+SH
+chmod 0755 "$BAD_POSTINST"
+make_fake_deb "$D/velnor-runner-${VER}-amd64.deb" amd64 runner-amd64 "$VER" "$WORK/build-identity.json" "$BAD_POSTINST"
+NEWHASH="$(sha256_file "$D/velnor-runner-${VER}-amd64.deb")"
+printf '%s\n' "$NEWHASH" > "$D/velnor-runner-${VER}-amd64.deb.sha256"
+jq --arg h "$NEWHASH" '(.architectures[] | select(.arch=="amd64") | .deb_sha256) |= $h' \
+  "$D/release-record.json" > "$D/release-record.json.tmp"
+mv "$D/release-record.json.tmp" "$D/release-record.json"
+sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
+expect_reject "postinst missing MemorySwapMax/TasksMax validation" "$D"
+
+# 11. extracted binary bytes disagree with the independently recorded digest.
 D="$(fresh_copy neg_binary)"
 make_fake_deb "$D/velnor-runner-${VER}-amd64.deb" amd64 tampered-runner
 NEWHASH="$(sha256_file "$D/velnor-runner-${VER}-amd64.deb")"
@@ -279,7 +313,7 @@ mv "$D/release-record.json.tmp" "$D/release-record.json"
 sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 expect_reject "extracted runner binary disagrees with record" "$D"
 
-# 11. publication writes the signed record and rollback pointer into the Pages
+# 12. publication writes the signed record and rollback pointer into the Pages
 # artifact, not the checkout. Fake only the external signer/reprepro boundary;
 # candidate bytes and release record remain the independently-built fixture.
 PUB="$WORK/publish"

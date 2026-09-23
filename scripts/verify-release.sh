@@ -120,6 +120,34 @@ extract_deb() {
   ar p "$deb" "$data" | tar -x -C "$dest" -f -
 }
 
+# Extract a .deb's control tree with portable tools. The maintainer scripts are
+# part of the package contract, so delivery verification must inspect the
+# exact postinst shipped by each architecture rather than a checkout copy.
+extract_deb_control() {
+  local deb="$1" dest="$2" control
+  mkdir -p "$dest"
+  if command -v dpkg-deb >/dev/null 2>&1; then
+    dpkg-deb -e "$deb" "$dest"
+    return
+  fi
+  control="$(ar t "$deb" | grep '^control\.tar' | head -n1)"
+  [ -n "$control" ] || fail "deb $deb has no control.tar member"
+  ar p "$deb" "$control" | tar -x -C "$dest" -f -
+}
+
+validate_postinst_quota_contract() {
+  local deb="$1" label="$2" control_dir postinst
+  control_dir="$(mktemp -d)"
+  extract_deb_control "$deb" "$control_dir"
+  postinst="$control_dir/postinst"
+  require_file "$postinst"
+  grep -F -- '--property=MemorySwapMax' "$postinst" >/dev/null \
+    || fail "$label postinst does not validate MemorySwapMax"
+  grep -F -- '--property=TasksMax' "$postinst" >/dev/null \
+    || fail "$label postinst does not validate TasksMax"
+  rm -rf "$control_dir"
+}
+
 # Read one control field from a .deb with portable tools (dpkg-deb when present,
 # else the control.tar member, so the check also runs on a developer workstation).
 deb_field() {
@@ -340,6 +368,7 @@ cmd_verify() {
     local xdir
     xdir="$(mktemp -d)"
     extract_deb "$deb" "$xdir"
+    validate_postinst_quota_contract "$deb" "$arch"
     local bi="$xdir/usr/share/velnor/build-identity.json"
     local pm="$xdir/usr/share/velnor/manifest.json"
     require_file "$bi"
@@ -464,6 +493,7 @@ verify_preview() {
     local xdir
     xdir="$(mktemp -d)"
     extract_deb "$deb" "$xdir"
+    validate_postinst_quota_contract "$deb" "$arch preview"
     require_file "$xdir/usr/share/velnor/build-identity.json"
     [ "$(jget "$xdir/usr/share/velnor/build-identity.json" '.source_sha')" = "$commit" ] \
       || fail "$arch preview deb build-identity source_sha != commit"
