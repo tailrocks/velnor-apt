@@ -32,12 +32,83 @@ jq -Sn --arg source_repository tailrocks/velnor --arg source_ref refs/tags/v$ver
   jq -e '.version=="1.2.3" and (.packages|length)==2' package-state.json
 )
 
-jq '.source_digest = "ffffffffffffffffffffffffffffffffffffffff"' "$verified/identity.json" > "$tmp/bad.json"
-mv "$tmp/bad.json" "$verified/identity.json"
-if (cd "$tmp/repo" && VELNOR_VERIFIED_PACKAGE_DIR="$verified" ./scripts/package-update.sh); then
-  echo "source identity mismatch was accepted" >&2
-  exit 1
-fi
+cp "$tmp/repo/package-state.json" "$tmp/stable-state.json"
+expect_stable_rejection() {
+  local label="$1" input="$2" before
+
+  rm -f "$tmp/repo/package-state.json"
+  if (cd "$tmp/repo" && VELNOR_VERIFIED_PACKAGE_DIR="$input" ./scripts/package-update.sh) >/dev/null 2>&1; then
+    echo "stable channel accepted: $label" >&2
+    exit 1
+  fi
+  [ ! -e "$tmp/repo/package-state.json" ] \
+    || { echo "stable state created despite rejection: $label" >&2; exit 1; }
+
+  cp "$tmp/stable-state.json" "$tmp/repo/package-state.json"
+  before=$(shasum -a 256 "$tmp/repo/package-state.json" | awk '{print $1}')
+  if (cd "$tmp/repo" && VELNOR_VERIFIED_PACKAGE_DIR="$input" ./scripts/package-update.sh) >/dev/null 2>&1; then
+    echo "stable channel accepted with prior state: $label" >&2
+    exit 1
+  fi
+  [ "$(shasum -a 256 "$tmp/repo/package-state.json" | awk '{print $1}')" = "$before" ] \
+    || { echo "stable state changed despite rejection: $label" >&2; exit 1; }
+}
+
+mkdir -p "$tmp/stable-bad"
+for case in malformed missing-manifest missing-payload tampered-payload wrong-architecture \
+  package-version duplicate-architecture arbitrary-digest null-digest identity-manifest \
+  identity-source-digest asset-extra; do
+  input="$tmp/stable-bad/$case"
+  mkdir "$input"
+  cp "$verified"/* "$input/"
+  mutation=''
+  case "$case" in
+    malformed)
+      printf '{\n' > "$input/release-manifest.json"
+      ;;
+    missing-manifest)
+      rm "$input/release-manifest.json"
+      ;;
+    missing-payload)
+      rm "$input/velnor-runner-${version}-arm64.deb"
+      ;;
+    tampered-payload)
+      printf 'tampered\n' > "$input/velnor-runner-${version}-amd64.deb"
+      ;;
+    wrong-architecture)
+      mutation='.assets[1].name = "velnor-runner-1.2.3-riscv64.deb"'
+      ;;
+    package-version)
+      mutation='.assets[0].name = "velnor-runner-9.9.9-amd64.deb" |
+                 .assets[1].name = "velnor-runner-9.9.9-arm64.deb"'
+      ;;
+    duplicate-architecture)
+      mutation='.assets[1].name = "velnor-runner-9.9.9-amd64.deb"'
+      ;;
+    arbitrary-digest)
+      mutation='.assets[0].sha256 = "not-a-digest"'
+      ;;
+    null-digest)
+      mutation='.assets[0].sha256 = null'
+      ;;
+    identity-manifest)
+      jq '.manifest.version = "9.9.9"' "$input/identity.json" > "$tmp/bad.json"
+      mv "$tmp/bad.json" "$input/identity.json"
+      ;;
+    identity-source-digest)
+      jq '.source_digest = "ffffffffffffffffffffffffffffffffffffffff"' "$input/identity.json" > "$tmp/bad.json"
+      mv "$tmp/bad.json" "$input/identity.json"
+      ;;
+    asset-extra)
+      mutation='.assets[0].extra = "unexpected"'
+      ;;
+  esac
+  if [ -n "$mutation" ]; then
+    jq "$mutation" "$input/release-manifest.json" > "$tmp/bad.json"
+    mv "$tmp/bad.json" "$input/release-manifest.json"
+  fi
+  expect_stable_rejection "$case" "$input"
+done
 
 # ============================ preview channel ==================================
 # The rolling `preview` release carries no release-record/identity pair: its
@@ -56,6 +127,8 @@ for arch in amd64 arm64; do
   digest=$(shasum -a 256 "$pverified/$name" | awk '{print $1}')
   jq -cn --arg name "$name" --arg sha256 "$digest" '{name:$name,sha256:$sha256}' >> "$tmp/preview-assets.jsonl"
 done
+# The single-quoted jq program deliberately keeps jq variables literal for jq.
+# shellcheck disable=SC2016
 preview_manifest='{
   schema:"velnor.package-release.v1",
   source_repository:$source_repository,
@@ -82,28 +155,82 @@ jq -Sn --arg source_repository tailrocks/velnor --arg source_ref refs/heads/main
   shasum -a 256 -c "$tmp/stable-state.sha"
 )
 
-# Every incoherent preview manifest must be rejected without writing state.
+# Every incoherent preview manifest must be rejected without writing state and
+# must preserve a previously valid preview state.
+cp "$tmp/repo/package-state-preview.json" "$tmp/preview-state.json"
+expect_preview_rejection() {
+  local label="$1" input="$2" before
+
+  rm -f "$tmp/repo/package-state-preview.json"
+  if (cd "$tmp/repo" && VELNOR_PACKAGE_CHANNEL=preview \
+        VELNOR_VERIFIED_PACKAGE_DIR="$input" ./scripts/package-update.sh) >/dev/null 2>&1; then
+    echo "preview channel accepted: $label" >&2
+    exit 1
+  fi
+  [ ! -e "$tmp/repo/package-state-preview.json" ] \
+    || { echo "preview state created despite rejection: $label" >&2; exit 1; }
+
+  cp "$tmp/preview-state.json" "$tmp/repo/package-state-preview.json"
+  before=$(shasum -a 256 "$tmp/repo/package-state-preview.json" | awk '{print $1}')
+  if (cd "$tmp/repo" && VELNOR_PACKAGE_CHANNEL=preview \
+        VELNOR_VERIFIED_PACKAGE_DIR="$input" ./scripts/package-update.sh) >/dev/null 2>&1; then
+    echo "preview channel accepted with prior state: $label" >&2
+    exit 1
+  fi
+  [ "$(shasum -a 256 "$tmp/repo/package-state-preview.json" | awk '{print $1}')" = "$before" ] \
+    || { echo "preview state changed despite rejection: $label" >&2; exit 1; }
+}
+
 mkdir -p "$tmp/preview-bad"
-for case in ref grammar sha asset-name asset-version single-asset; do
+for case in ref grammar sha asset-name asset-version single-asset malformed missing-manifest \
+  missing-payload tampered-payload wrong-architecture arbitrary-digest null-digest \
+  asset-extra duplicate-architecture; do
+  input="$tmp/preview-bad/$case"
+  mkdir "$input"
+  cp "$pverified"/* "$input/"
+  mutation=''
   case "$case" in
     ref)           mutation='.source_ref = "refs/tags/v1.2.3"' ;;
     grammar)       mutation='.version = "1.2.3"' ;;
     sha)           mutation='.source_commit = "fffffffffffffffffffffffffffffffffffffff0"' ;;
     # A tilde asset name can never be served (`~` is rewritten to `.` on
     # upload); a dotted name for a foreign version is a different release.
-    asset-name)    mutation='(.assets[0].name) = "velnor-runner-preview-9.9.9~preview.1+0123456-amd64.deb"' ;;
-    asset-version) mutation='(.assets[0].name) = "velnor-runner-preview-9.9.9.preview.1+0123456-amd64.deb"' ;;
+    asset-name)    mutation='.assets[0].name = "velnor-runner-preview-9.9.9~preview.1+0123456-amd64.deb"' ;;
+    asset-version) mutation='.assets[0].name = "velnor-runner-preview-9.9.9.preview.1+0123456-amd64.deb"' ;;
     single-asset)  mutation='.assets |= .[0:1]' ;;
+    malformed)
+      printf '{\n' > "$input/release-manifest.json"
+      ;;
+    missing-manifest)
+      rm "$input/release-manifest.json"
+      ;;
+    missing-payload)
+      rm "$input/velnor-runner-preview-${preview_asset_version}-arm64.deb"
+      ;;
+    tampered-payload)
+      printf 'tampered\n' > "$input/velnor-runner-preview-${preview_asset_version}-amd64.deb"
+      ;;
+    wrong-architecture)
+      mutation='.assets[1].name = "velnor-runner-preview-1.2.3.preview.7+0123456-riscv64.deb"'
+      ;;
+    arbitrary-digest)
+      mutation='.assets[0].sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"'
+      ;;
+    null-digest)
+      mutation='.assets[0].sha256 = null'
+      ;;
+    asset-extra)
+      mutation='.assets[0].extra = "unexpected"'
+      ;;
+    duplicate-architecture)
+      mutation='.assets[1].name = "velnor-runner-preview-1.2.3.preview.7+0123456-amd64.deb"'
+      ;;
   esac
-  rm -f "$tmp/repo/package-state-preview.json"
-  jq "$mutation" "$pverified/release-manifest.json" > "$tmp/preview-bad/release-manifest.json"
-  if (cd "$tmp/repo" && VELNOR_PACKAGE_CHANNEL=preview \
-        VELNOR_VERIFIED_PACKAGE_DIR="$tmp/preview-bad" ./scripts/package-update.sh); then
-    echo "preview channel accepted: $case" >&2
-    exit 1
+  if [ -n "$mutation" ]; then
+    jq "$mutation" "$input/release-manifest.json" > "$tmp/bad.json"
+    mv "$tmp/bad.json" "$input/release-manifest.json"
   fi
-  [ ! -e "$tmp/repo/package-state-preview.json" ] \
-    || { echo "preview state written despite rejection: $case" >&2; exit 1; }
+  expect_preview_rejection "$case" "$input"
 done
 
 # An unlisted channel must fail closed, exactly like an incoherent manifest.

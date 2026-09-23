@@ -136,15 +136,17 @@ extract_deb_control() {
 }
 
 validate_postinst_quota_contract() {
-  local deb="$1" label="$2" control_dir postinst
+  local deb="$1" label="$2" control_dir postinst property
   control_dir="$(mktemp -d)"
   extract_deb_control "$deb" "$control_dir"
   postinst="$control_dir/postinst"
   require_file "$postinst"
-  grep -F -- '--property=MemorySwapMax' "$postinst" >/dev/null \
-    || fail "$label postinst does not validate MemorySwapMax"
-  grep -F -- '--property=TasksMax' "$postinst" >/dev/null \
-    || fail "$label postinst does not validate TasksMax"
+  # Static package-contract check only: declarations here do not prove that
+  # the installed workload slice enforces the limits at runtime.
+  for property in CPUQuotaPerSecUSec MemoryMax MemoryHigh MemorySwapMax TasksMax; do
+    grep -F -- "--property=$property" "$postinst" >/dev/null \
+      || fail "$label postinst does not declare $property"
+  done
   rm -rf "$control_dir"
 }
 
@@ -162,6 +164,16 @@ deb_field() {
   ar p "$deb" "$ctl" | tar -x -C "$tmp" -f -
   awk -v f="$field" '$1 == f":" {print $2}' "$tmp/control"
   rm -rf "$tmp"
+}
+
+validate_deb_control_contract() {
+  local deb="$1" label="$2" expected_version="$3" expected_arch="$4"
+  [ "$(deb_field "$deb" Package)" = velnor-runner ] \
+    || fail "$label deb Package is not velnor-runner"
+  [ "$(deb_field "$deb" Version)" = "$expected_version" ] \
+    || fail "$label deb Version != $expected_version"
+  [ "$(deb_field "$deb" Architecture)" = "$expected_arch" ] \
+    || fail "$label deb Architecture != $expected_arch"
 }
 
 resolve_commit() {
@@ -257,8 +269,10 @@ cmd_verify() {
       *) fail "verify: unknown arg $1" ;;
     esac
   done
-  [ -n "$version" ] || fail "verify: --version required"
   [ -n "$incoming" ] || fail "verify: --incoming required"
+  # A prior successful verification must never authorize a failed revalidation.
+  rm -f "$incoming/.reprepro-ok"
+  [ -n "$version" ] || fail "verify: --version required"
   [ -n "$signer" ] || fail "verify: --signer required"
   [ -n "$expect_signer" ] || fail "verify: --expect-signer required"
   if [ "$suite" = preview ]; then
@@ -312,6 +326,12 @@ cmd_verify() {
   local record_manifest_ver
   record_manifest_ver="$(jget "$record" '.build.manifest_version | select(type == "number" and . > 0 and floor == .)')"
   [ "$(jget "$record" '.build.commit')" = "$commit" ] || fail "record commit does not match the independently resolved tag commit"
+  [ "$(jget "$record" '.apt.origin')" = Velnor ] \
+    || fail "record APT origin is not Velnor"
+  [ "$(jget "$record" '.apt.suite')" = stable ] \
+    || fail "record APT suite is not stable"
+  [ "$(jget "$record" '.apt.component')" = main ] \
+    || fail "record APT component is not main"
 
   # --- manifest binding (extracted vs packaged identity) -----------------------
   local record_manifest_hash manifest_source manifest_crate manifest_ver
@@ -362,6 +382,16 @@ cmd_verify() {
     [ "$want_deb" = "$have_deb" ] || fail "$arch deb sidecar checksum mismatch"
     record_deb="$(jq -er --arg a "$arch" '.architectures[] | select(.arch==$a) | .deb_sha256' "$record")"
     [ "$record_deb" = "$have_deb" ] || fail "$arch deb hash != record deb_sha256"
+
+    local expected_target record_target
+    case "$arch" in
+      amd64) expected_target=x86_64-unknown-linux-gnu ;;
+      arm64) expected_target=aarch64-unknown-linux-gnu ;;
+    esac
+    record_target="$(jq -er --arg a "$arch" '.architectures[] | select(.arch==$a) | .target' "$record")"
+    [ "$record_target" = "$expected_target" ] \
+      || fail "$arch record target is not $expected_target"
+    validate_deb_control_contract "$deb" "$arch" "$ver" "$arch"
 
     # Extracted + packaged identity: the identity files shipped INSIDE the deb
     # must agree with the resolved commit and the compiled manifest hash.
@@ -484,11 +514,7 @@ verify_preview() {
 
     # Packaged identity: control fields and the shipped build-identity must agree
     # with the supplied commit and the base X.Y.Z of the preview version.
-    [ "$(deb_field "$deb" Package)" = velnor-runner ] \
-      || fail "$arch preview deb Package is not velnor-runner"
-    [ "$(deb_field "$deb" Version)" = "$ver" ] || fail "$arch preview deb Version != $ver"
-    [ "$(deb_field "$deb" Architecture)" = "$arch" ] \
-      || fail "$arch preview deb Architecture != $arch"
+    validate_deb_control_contract "$deb" "$arch preview" "$ver" "$arch"
 
     local xdir
     xdir="$(mktemp -d)"
@@ -555,9 +581,18 @@ verify_oci_live() {
 # The live signing key must be the pinned publisher identity; a rotated or
 # unexpected signer stops publication rather than silently re-signing.
 check_signer_fingerprint() {
-  local live_fpr pinned_fpr
-  live_fpr="$(printf '%s' "$1" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
-  pinned_fpr="$(printf '%s' "$2" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+  local live_fpr pinned_fpr fpr
+  live_fpr="$(printf '%s' "$1" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+  pinned_fpr="$(printf '%s' "$2" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+  for fpr in "$live_fpr" "$pinned_fpr"; do
+    case "$fpr" in
+      *[!0-9A-F]* | "") fail "APT signer fingerprint must be full 40 or 64 hexadecimal digits" ;;
+    esac
+    case "${#fpr}" in
+      40|64) ;;
+      *) fail "APT signer fingerprint must be full 40 or 64 hexadecimal digits" ;;
+    esac
+  done
   [ "$live_fpr" = "$pinned_fpr" ] \
     || fail "APT signer fingerprint does not match the pinned publisher key"
 }
