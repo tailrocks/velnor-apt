@@ -18,12 +18,17 @@ trap 'rm -rf "$WORK"' EXIT
 VERSION="v0.1.121"
 VER="0.1.121"
 COMMIT="1111111111111111111111111111111111111111"
-SIGNER="261EDAC957DEB801"
+SIGNER="261EDAC957DEB801000000000000000000000000"
 REQUIRED_ARCHES="amd64 arm64"
 
 pass=0
 ok() { echo "ok - $1"; pass=$((pass + 1)); }
 die() { echo "FAIL - $1" >&2; exit 1; }
+
+grep -F -- 'velnor-workflow-runtime-' "$WORKFLOW" >/dev/null \
+  || die "release discovery does not name the excluded runtime release family"
+grep -F -- 'test("^v[0-9]+' "$WORKFLOW" >/dev/null \
+  || die "release discovery does not restrict stable targets to application tags"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
@@ -44,6 +49,15 @@ BIN_ARM="$(sha256_str runner-arm64)"
 BASE="$WORK/base"
 mkdir -p "$BASE"
 
+POSTINST="$WORK/postinst"
+cat > "$POSTINST" <<'SH'
+#!/bin/sh
+systemctl show \
+  --property=CPUQuotaPerSecUSec --property=MemoryMax --property=MemoryHigh \
+  --property=MemorySwapMax --property=TasksMax --value velnor-jobs.slice
+SH
+chmod 0755 "$POSTINST"
+
 # --- shared identity fixtures (arch-independent, as the real deb ships) --------
 cat > "$BASE/manifest.json" <<JSON
 {"version":7,"source_sha":"$COMMIT","crate_version":"$VER","actions":[],"reusable_workflows":[]}
@@ -58,7 +72,9 @@ JSON
 # Hand-assemble a .deb (ar archive with data.tar.gz) shipping the identity files.
 make_fake_deb() {
   local out="$1" arch="$2" binary_bytes="${3:-runner-$2}" version="${4:-$VER}"
-  local identity="${5:-$WORK/build-identity.json}"
+  local identity="${5:-$WORK/build-identity.json}" postinst="${6:-$POSTINST}"
+  local control_package="${7:-velnor-runner}" control_version="${8:-$version}"
+  local control_arch="${9:-$arch}"
   local stage; stage="$(mktemp -d)"
   mkdir -p "$stage/root/usr/share/velnor" "$stage/root/usr/bin"
   cp "$identity" "$stage/root/usr/share/velnor/build-identity.json"
@@ -67,7 +83,10 @@ make_fake_deb() {
   printf 'control-panel-%s' "$arch" > "$stage/root/usr/bin/velnorctl"
   ( cd "$stage/root" && tar -czf "$stage/data.tar.gz" . )
   mkdir -p "$stage/ctl"
-  printf 'Package: velnor-runner\nVersion: %s\nArchitecture: %s\n' "$version" "$arch" > "$stage/ctl/control"
+  printf 'Package: %s\nVersion: %s\nArchitecture: %s\n' \
+    "$control_package" "$control_version" "$control_arch" > "$stage/ctl/control"
+  cp "$postinst" "$stage/ctl/postinst"
+  chmod 0755 "$stage/ctl/postinst"
   ( cd "$stage/ctl" && tar -czf "$stage/control.tar.gz" . )
   printf '2.0\n' > "$stage/debian-binary"
   ( cd "$stage" && rm -f "$out" && ar rcS "$out" debian-binary control.tar.gz data.tar.gz )
@@ -110,6 +129,20 @@ fresh_copy() {
   rm -rf "$dir"; mkdir -p "$dir"
   cp -R "$BASE/." "$dir/"
   printf '%s' "$dir"
+}
+
+refresh_stable_amd64_deb() {
+  local dir="$1" postinst="$2" package="$3" control_version="$4"
+  local control_arch="$5" binary_bytes="${6:-runner-amd64}"
+  make_fake_deb "$dir/velnor-runner-${VER}-amd64.deb" amd64 "$binary_bytes" "$VER" \
+    "$WORK/build-identity.json" "$postinst" "$package" "$control_version" "$control_arch"
+  local hash
+  hash="$(sha256_file "$dir/velnor-runner-${VER}-amd64.deb")"
+  printf '%s\n' "$hash" > "$dir/velnor-runner-${VER}-amd64.deb.sha256"
+  jq --arg h "$hash" '(.architectures[] | select(.arch=="amd64") | .deb_sha256) |= $h' \
+    "$dir/release-record.json" > "$dir/release-record.json.tmp"
+  mv "$dir/release-record.json.tmp" "$dir/release-record.json"
+  sha256_file "$dir/release-record.json" > "$dir/release-record.json.sha256"
 }
 
 run_verify() { # dir + extra args -> exit code
@@ -178,6 +211,14 @@ run_verify "$POS" || die "positive fixture should verify"
 [ -f "$POS/.reprepro-ok" ] || die "positive fixture did not arm the reprepro sentinel"
 ok "coherent release verifies and arms the sentinel"
 
+POS_NORMALIZED="$(fresh_copy positive_normalized_signer)"
+if ! bash "$SCRIPT" verify --version "$VERSION" --incoming "$POS_NORMALIZED" --commit "$COMMIT" \
+     --signer "261e dac9 57de b801 0000 0000 0000 0000 0000 0000" \
+     --expect-signer "$SIGNER" >/dev/null 2>&1; then
+  die "case and spaces in a full signer fingerprint should be accepted"
+fi
+ok "full signer fingerprint accepts normalized case and spaces"
+
 POS_OCI="$(fresh_copy positive_oci)"
 run_verify_live "$POS_OCI" || die "multi-platform live OCI fixture should verify"
 [ -f "$POS_OCI/.reprepro-ok" ] || die "live OCI fixture did not arm the sentinel"
@@ -192,9 +233,61 @@ ok "rejected: one OCI platform label differs from the release record"
 
 # ============================ negatives =======================================
 
+# Stable packages must carry the expected control metadata, independent of
+# their filenames and checksums.
+for control_case in package version architecture; do
+  D="$(fresh_copy "neg_stable_control_$control_case")"
+  control_package=velnor-runner
+  control_version="$VER"
+  control_arch=amd64
+  case "$control_case" in
+    package) control_package=other-package ;;
+    version) control_version=0.1.120 ;;
+    architecture) control_arch=arm64 ;;
+  esac
+  refresh_stable_amd64_deb "$D" "$POSTINST" "$control_package" "$control_version" "$control_arch"
+  expect_reject "stable deb control $control_case mismatch" "$D"
+done
+
+# Each stable architecture must bind to its exact Linux compilation target.
+for target_arch in $REQUIRED_ARCHES; do
+  D="$(fresh_copy "neg_target_$target_arch")"
+  case "$target_arch" in
+    amd64) bad_target=aarch64-unknown-linux-gnu ;;
+    arm64) bad_target=x86_64-unknown-linux-gnu ;;
+  esac
+  jq --arg arch "$target_arch" --arg target "$bad_target" \
+    '.architectures |= map(if .arch == $arch then .target = $target else . end)' \
+    "$D/release-record.json" > "$D/release-record.json.tmp"
+  mv "$D/release-record.json.tmp" "$D/release-record.json"
+  sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
+  expect_reject "stable $target_arch target is not the expected Linux target" "$D"
+done
+
+# Stable record APT identity is fixed to the Velnor stable/main publication.
+for apt_field in origin suite component; do
+  D="$(fresh_copy "neg_apt_$apt_field")"
+  case "$apt_field" in
+    origin) bad_apt=Other ;;
+    suite) bad_apt=preview ;;
+    component) bad_apt=contrib ;;
+  esac
+  jq --arg field "$apt_field" --arg value "$bad_apt" \
+    '.apt[$field] = $value' "$D/release-record.json" > "$D/release-record.json.tmp"
+  mv "$D/release-record.json.tmp" "$D/release-record.json"
+  sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
+  expect_reject "stable record apt.$apt_field is not the expected identity" "$D"
+done
+
 # 1. record checksum mismatch (tamper record, keep old sidecar)
 D="$(fresh_copy neg_record)"; printf ' ' >> "$D/release-record.json"
 expect_reject "tampered record fails checksum" "$D"
+
+# A failed revalidation must clear a sentinel left by an earlier attempt.
+D="$(fresh_copy neg_stale_sentinel)"
+: > "$D/.reprepro-ok"
+printf ' ' >> "$D/release-record.json"
+expect_reject "failed revalidation clears a stale sentinel" "$D"
 
 # 2. deb hash mismatch (tamper a deb, keep sidecar + record)
 D="$(fresh_copy neg_deb)"; printf 'x' >> "$D/velnor-runner-${VER}-amd64.deb"
@@ -227,11 +320,21 @@ expect_reject "manifest hash != record manifest hash" "$D"
 # 7. signer fingerprint mismatch
 D="$(fresh_copy neg_signer)"
 if bash "$SCRIPT" verify --version "$VERSION" --incoming "$D" --commit "$COMMIT" \
-     --signer "$SIGNER" --expect-signer "DEADBEEFDEADBEEF" >/dev/null 2>&1; then
+     --signer "$SIGNER" --expect-signer "DEADBEEFDEADBEEF000000000000000000000000" >/dev/null 2>&1; then
   die "expected rejection on signer mismatch"
 fi
 [ ! -f "$D/.reprepro-ok" ] || die "sentinel armed on signer mismatch"
 ok "rejected: APT signer fingerprint mismatch"
+
+for bad_signer in "DEADBEEFDEADBEEF" "not-a-fingerprint"; do
+  D="$(fresh_copy "neg_signer_format_${bad_signer//[^[:alnum:]]/_}")"
+  if bash "$SCRIPT" verify --version "$VERSION" --incoming "$D" --commit "$COMMIT" \
+       --signer "$bad_signer" --expect-signer "$bad_signer" >/dev/null 2>&1; then
+    die "expected rejection on short or malformed signer fingerprint: $bad_signer"
+  fi
+  [ ! -f "$D/.reprepro-ok" ] || die "sentinel armed on invalid signer fingerprint: $bad_signer"
+  ok "rejected: invalid signer fingerprint ($bad_signer)"
+done
 
 # 8. OCI image ref does not pin the index digest
 D="$(fresh_copy neg_oci)"
@@ -255,7 +358,9 @@ cp "$BASE/manifest.json" "$BAD_STAGE/root/usr/share/velnor/manifest.json"
 printf 'runner-amd64' > "$BAD_STAGE/root/usr/bin/velnor-runner"
 printf 'control-panel-amd64' > "$BAD_STAGE/root/usr/bin/velnorctl"
 ( cd "$BAD_STAGE/root" && tar -czf "$BAD_STAGE/data.tar.gz" . )
-mkdir -p "$BAD_STAGE/ctl"; printf 'Package: velnor-runner\n' > "$BAD_STAGE/ctl/control"
+mkdir -p "$BAD_STAGE/ctl"
+printf 'Package: velnor-runner\nVersion: %s\nArchitecture: amd64\n' "$VER" > "$BAD_STAGE/ctl/control"
+cp "$POSTINST" "$BAD_STAGE/ctl/postinst"
 ( cd "$BAD_STAGE/ctl" && tar -czf "$BAD_STAGE/control.tar.gz" . )
 printf '2.0\n' > "$BAD_STAGE/debian-binary"
 ( cd "$BAD_STAGE" && rm -f "$D/velnor-runner-${VER}-amd64.deb" && ar rcS "$D/velnor-runner-${VER}-amd64.deb" debian-binary control.tar.gz data.tar.gz )
@@ -268,7 +373,19 @@ sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 rm -rf "$BAD_STAGE"
 expect_reject "packaged identity inside the deb disagrees with the commit" "$D"
 
-# 10. extracted binary bytes disagree with the independently recorded digest.
+# 10. postinst must declare all five workload-slice quota properties. This is a
+# static package-contract check; it does not prove the installed limits are
+# effective at runtime.
+for missing_quota in CPUQuotaPerSecUSec MemoryMax MemoryHigh MemorySwapMax TasksMax; do
+  D="$(fresh_copy "neg_postinst_$missing_quota")"
+  BAD_POSTINST="$WORK/postinst-missing-$missing_quota"
+  grep -F -v -- "--property=$missing_quota" "$POSTINST" > "$BAD_POSTINST"
+  chmod 0755 "$BAD_POSTINST"
+  refresh_stable_amd64_deb "$D" "$BAD_POSTINST" velnor-runner "$VER" amd64
+  expect_reject "postinst missing $missing_quota declaration" "$D"
+done
+
+# 11. extracted binary bytes disagree with the independently recorded digest.
 D="$(fresh_copy neg_binary)"
 make_fake_deb "$D/velnor-runner-${VER}-amd64.deb" amd64 tampered-runner
 NEWHASH="$(sha256_file "$D/velnor-runner-${VER}-amd64.deb")"
@@ -279,7 +396,7 @@ mv "$D/release-record.json.tmp" "$D/release-record.json"
 sha256_file "$D/release-record.json" > "$D/release-record.json.sha256"
 expect_reject "extracted runner binary disagrees with record" "$D"
 
-# 11. publication writes the signed record and rollback pointer into the Pages
+# 12. publication writes the signed record and rollback pointer into the Pages
 # artifact, not the checkout. Fake only the external signer/reprepro boundary;
 # candidate bytes and release record remain the independently-built fixture.
 PUB="$WORK/publish"
@@ -570,11 +687,22 @@ refresh_preview_metadata "$D" "$PVERSION" "$PCOMMIT"
 rm -rf "$BAD_STAGE"
 expect_reject_preview "preview deb build-identity crate_version != preview base version" "$D"
 
-D="$(preview_copy neg_preview_control)"
-make_fake_deb "$D/$(preview_asset "$PVERSION" amd64)" arm64 \
-  "preview-runner-amd64" "$PVERSION"
-refresh_preview_metadata "$D" "$PVERSION" "$PCOMMIT"
-expect_reject_preview "preview deb control architecture disagrees with the asset arch" "$D"
+for control_case in package version architecture; do
+  D="$(preview_copy "neg_preview_control_$control_case")"
+  control_package=velnor-runner
+  control_version="$PVERSION"
+  control_arch=amd64
+  case "$control_case" in
+    package) control_package=other-package ;;
+    version) control_version=0.1.274~preview.41+abc1234 ;;
+    architecture) control_arch=arm64 ;;
+  esac
+  make_fake_deb "$D/$(preview_asset "$PVERSION" amd64)" amd64 \
+    "preview-runner-amd64" "$PVERSION" "$WORK/build-identity.json" "$POSTINST" \
+    "$control_package" "$control_version" "$control_arch"
+  refresh_preview_metadata "$D" "$PVERSION" "$PCOMMIT"
+  expect_reject_preview "preview deb control $control_case mismatch" "$D"
+done
 
 D="$(preview_copy neg_preview_sums)"
 printf '%s  %s\n' "$(sha256_str stray)" \
