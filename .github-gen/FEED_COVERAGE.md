@@ -96,3 +96,33 @@ completed Admit success → **Verify apt feed success** ("stable feed inputs
 are coherent" in the job log, `apt-incoming` uploaded) → Publish failure
 (defect 3, fail-closed) → Deploy skipped → Feed result fail-closed. Policy
 dispatch `35280641908` on main completed Policy success (11/11).
+
+## Rolling preview source binding
+
+The source-owned `scripts/preview-feed-inputs.sh` is the preview identity
+adapter for the generic generated feed path. It reads the published `preview`
+release, fetches that release's `release-manifest.json` by provider asset ID,
+checks the provider asset digest and byte size, and derives `source_commit`
+only from the manifest. The release `target_commitish` is checked only as a
+consistency field; it is never the source of the feed commit. The adapter also
+requires `refs/heads/main`, the `X.Y.Z~preview.N+<7-hex>` binding, and the
+complete amd64/arm64 package records. Existing attestation verification,
+`apt-verify`, signed `apt-publish`, rollback recovery, and channel-pointer
+updates remain downstream gates.
+
+The current generated `release.yml` is not wired to this adapter: its preview
+branch still reads `gh release view preview --json targetCommitish`. The exact
+product prerequisite is a released `velnor-workflow` generator/runtime revision
+that invokes this source adapter before `apt-fetch` and passes its manifest
+`version`, `source_commit`, and `source_ref` through the existing fetch,
+attestation, verify, publish, and channel-update path. Then bump the full SHA
+in `.github-gen/velnor-workflow.toml` and regenerate `.github`; do not hand-edit
+generated workflow output. The current pin
+`eed474c4a1d9b071fd1b5de00c769c8997398e5a` does not provide that hook.
+
+For run `35797775098`, the immediate product gate is completion and publication
+of the rolling release from source
+`6391a0ce53b7e666d1bfb391083011622158f4f3`. Its published manifest must carry
+that exact SHA, `refs/heads/main`, the matching seven-character version suffix,
+both package records, and their existing signed attestations before a preview
+feed run may consume it. An in-progress producer run is not a feed input.
