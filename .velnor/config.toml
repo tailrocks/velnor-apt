@@ -1,0 +1,4 @@
+schema = 1
+
+[workflow]
+default_branch = "main"
