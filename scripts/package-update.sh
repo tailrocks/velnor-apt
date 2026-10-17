@@ -30,22 +30,62 @@ fi
 
 identity="$verified/identity.json"
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$1" | awk '{print $1}'
+  else
+    shasum -a 256 -- "$1" | awk '{print $1}'
+  fi
+}
+
+validate_verified_package_assets() {
+  local name digest payload actual
+  while IFS=$'\t' read -r name digest; do
+    [ -n "$name" ] || {
+      printf 'package-update: manifest asset row is empty\n' >&2
+      return 1
+    }
+    payload="$verified/$name"
+    [ -f "$payload" ] || {
+      printf 'package-update: verified asset is missing: %s\n' "$name" >&2
+      return 1
+    }
+    actual="$(sha256_file "$payload")"
+    [ "$actual" = "$digest" ] || {
+      printf 'package-update: verified asset digest mismatch: %s\n' "$name" >&2
+      return 1
+    }
+  done < <(jq -er '.assets[] | [.name,.sha256] | @tsv' "$manifest")
+}
+
 if [ "$channel" = stable ]; then
   jq -e '
     keys == ["manifest","source_digest","source_ref","source_repository"] and
     .source_repository == "tailrocks/velnor" and
     (.source_ref | test("^refs/tags/v[0-9]+[.][0-9]+[.][0-9]+$")) and
-    (.source_digest | test("^[0-9a-f]{40}$"))
+    (.source_digest | test("^[0-9a-f]{40}$")) and
+    (.manifest | type == "object")
   ' "$identity" >/dev/null
 
-  jq -e '
+  jq -e --slurpfile manifest_copy "$manifest" '
+    .manifest == $manifest_copy[0]
+  ' "$identity" >/dev/null
+
+  version="$(jq -er '.version | strings | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' "$manifest")"
+  jq -e --arg version "$version" '
     keys == ["assets","schema","source_commit","source_ref","source_repository","version"] and
     .schema == "velnor.package-release.v1" and
     .source_repository == "tailrocks/velnor" and
     (.source_ref | test("^refs/tags/v[0-9]+[.][0-9]+[.][0-9]+$")) and
     (.source_commit | test("^[0-9a-f]{40}$")) and
-    (.version | test("^[0-9]+[.][0-9]+[.][0-9]+$")) and
-    ([.assets[] | select(.name | test("^velnor-runner-[0-9]+[.][0-9]+[.][0-9]+-(amd64|arm64)[.]deb$"))] | length) == 2
+    .version == $version and
+    (.assets | type == "array" and length == 2) and
+    ([.assets[].name] | sort) ==
+      (["velnor-runner-" + $version + "-amd64.deb",
+        "velnor-runner-" + $version + "-arm64.deb"] | sort) and
+    all(.assets[];
+      (keys | sort) == ["name","sha256"] and
+      (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
   ' "$manifest" >/dev/null
 
   test "$(jq -r .source_ref "$identity")" = "$(jq -r .source_ref "$manifest")"
@@ -59,7 +99,9 @@ else
     (.source_commit | test("^[0-9a-f]{40}$")) and
     (.version | test($version_re)) and
     (.assets | length) == 2 and
-    all(.assets[]; (.sha256 | test("^[0-9a-f]{64}$"))) and
+    all(.assets[];
+      (keys | sort) == ["name","sha256"] and
+      (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
     .source_commit[0:7] ==
       (.version | capture("^[0-9]+[.][0-9]+[.][0-9]+~preview[.][0-9]+\\+(?<sha>[0-9a-f]{7})$").sha) and
     # GitHub rewrites release asset names on upload (`~` becomes `.`), so the
@@ -71,6 +113,8 @@ else
         map("velnor-runner-preview-" + ($v | sub("~"; ".")) + "-" + . + ".deb") | sort))
   ' "$manifest" >/dev/null
 fi
+
+validate_verified_package_assets
 
 jq -S '{
   schema:"velnor.apt-package-state.v1",

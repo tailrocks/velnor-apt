@@ -15,7 +15,7 @@ run = "actionlint"
 # tests. shellcheck catches shell defects; the fixture test proves verify-release
 # accepts a coherent release and rejects every incoherent one before reprepro.
 [tasks.shellcheck]
-run = "shellcheck scripts/verify-release.sh scripts/test-verify-release.sh scripts/release-discovery.sh scripts/test-release-discovery.sh"
+run = "shellcheck scripts/*.sh"
 
 [tasks.verify-release-test]
 run = "scripts/test-verify-release.sh"
